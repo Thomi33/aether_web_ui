@@ -28,6 +28,12 @@
       </nav>
 
       <div class="sidebar-section">
+        <div class="section-label">SESIONES AETHER <span class="muted small" id="sesiones-count"></span></div>
+        <ul id="session-list"></ul>
+        <div class="nav-item small" id="btn-refresh-sessions" title="Recarga las sesiones del runtime (memoria.db)">⟳ Actualizar sesiones</div>
+      </div>
+
+      <div class="sidebar-section">
         <div class="section-label">WORKSPACE</div>
         <div class="nav-item disabled" title="Disponible próximamente">▤ Proyectos</div>
         <div class="nav-item disabled" title="Disponible próximamente">◈ Memoria</div>
@@ -109,6 +115,17 @@
         <div class="kv"><span>Turnos memoria</span><b id="rt-mem">—</b></div>
         <div class="kv"><span>Versión</span><b id="rt-version">—</b></div>
       </div>
+
+      <div class="panel" id="plan-panel" hidden>
+        <div class="section-label">ACTIVIDAD</div>
+        <ul id="plan-steps" class="plan-steps"></ul>
+        <ul id="activity-lines" class="activity-lines"></ul>
+      </div>
+
+      <details class="panel" id="log-panel" open>
+        <summary>LOGS <span class="muted small" id="log-count">0</span></summary>
+        <div id="log-lines" class="log-lines"></div>
+      </details>
 
       <div class="panel">
         <div class="section-label">SYSTEM PROMPT</div>

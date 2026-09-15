@@ -1,7 +1,25 @@
 /* ══════════════════════════════════════════════════════════════════════
  * Aether Web UI — app.js
- * Chat con streaming real (SSE) contra el backend FastAPI + panel de
- * configuración (la misma config.json que la TUI) + system prompt editable.
+ * Interfaz web con PARIDAD de features con la TUI (tui/app.py), hablando
+ * con el backend FastAPI (mismo motor LangGraph del runtime):
+ *
+ * - Chat con streaming real (SSE): tokens en vivo.
+ * - Chip de actividad con ESTADO HUMANO (mismo mapa que status_messages).
+ * - Panel ACTIVIDAD: plan de ejecución + líneas de trabajo en vivo
+ *   (port de tui/widgets/plan_panel.py).
+ * - Panel LOGS: stdout del motor en vivo (port del DebugPanel de la TUI).
+ * - Sesiones del runtime (memoria.db): listar y abrir historiales reales,
+ *   además de las conversaciones locales del navegador.
+ * - Config de la TUI (config.json), system prompt editable y selector de
+ *   modelos — mismas validaciones que la TUI.
+ *
+ * FIXES de la auditoría (bug fuerte de render):
+ * - Clases de burbuja: .msg.user / .msg.assistant (antes msg-user ≠ CSS).
+ * - Contenido dentro de .msg-content (antes iba suelto en .msg-body y el
+ *   CSS de burbujas/fondos/código nunca aplicaba).
+ * - Errores: clase .error (antes msg-error, inexistente en el CSS).
+ * - Dots de estado: online/offline/busy (antes on/off, inexistentes).
+ * - Toasts de error: #toast.error (antes toast-ok/toast-err).
  * ══════════════════════════════════════════════════════════════════════ */
 "use strict";
 
@@ -13,14 +31,19 @@ const $ = (id) => document.getElementById(id);
 const API_BASE = (window.AETHER_API_BASE || "").replace(/\/+$/, "");
 
 /* ── Estado ── */
-let conversaciones = [];
+let conversaciones = [];     // persistidas en localStorage (navegador)
 let convActual = null;
+let sesionVista = null;      // sesión del runtime abierta en modo lectura
+let sesiones = [];           // cache de /api/sessions (historial real)
 let streamingActivo = false;
 let abortStream = null;
 
 const LS_KEY = "aether_webui_convs";
 
 /* ══════════════════════════ Utilidades ══════════════════════════ */
+
+const RE_ANSI = /\x1b\[[0-9;]*[a-zA-Z]/g;
+const stripAnsi = (s) => String(s ?? "").replace(RE_ANSI, "");
 
 function escapeHtml(s) {
   return (s ?? "").replace(/[&<>"']/g, (c) => ({
@@ -41,7 +64,7 @@ function renderTexto(s) {
 function toast(msg, ok = true) {
   const t = $("toast");
   t.textContent = msg;
-  t.className = ok ? "toast-ok" : "toast-err";
+  t.className = ok ? "" : "error";   // FIX: el CSS solo tiene #toast.error
   t.hidden = false;
   clearTimeout(toast._t);
   toast._t = setTimeout(() => { t.hidden = true; }, 3200);
@@ -53,7 +76,7 @@ async function api(path, opts) {
   return resp;
 }
 
-/* ══════════════════════════ Conversaciones ══════════════════════════ */
+/* ══════════════════════════ Conversaciones (localStorage) ══════════ */
 
 function cargarConvs() {
   try { conversaciones = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); }
@@ -78,19 +101,36 @@ function nuevaConversacion(silencio = false) {
   if (!silencio) toast("Nueva conversación");
 }
 
+function borrarConversacion(id) {
+  conversaciones = conversaciones.filter((c) => c.id !== id);
+  if (convActual && convActual.id === id) convActual = null;
+  persistirConvs();
+  pintarConvList();
+  if (!convActual) nuevaConversacion(true);
+  else pintarMensajes();
+}
+
 function pintarConvList() {
   const ul = $("conv-list");
   ul.innerHTML = "";
   for (const c of conversaciones) {
     const li = document.createElement("li");
-    li.textContent = c.title;
-    li.className = c === convActual ? "active" : "";
+    li.className = (!sesionVista && c === convActual) ? "active" : "";
     li.title = c.title;
-    li.onclick = () => {
+    li.innerHTML =
+      `<span class="conv-title">${escapeHtml(c.title)}</span>` +
+      `<span class="del" title="Borrar conversación">✕</span>`;
+    li.querySelector(".del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      borrarConversacion(c.id);
+    });
+    li.addEventListener("click", () => {
+      sesionVista = null;
       convActual = c;
       pintarConvList();
+      pintarSessionList();
       pintarMensajes();
-    };
+    });
     ul.appendChild(li);
   }
   if (!conversaciones.length) {
@@ -98,10 +138,15 @@ function pintarConvList() {
   }
 }
 
+function _mensajesActivos() {
+  if (sesionVista) return sesionVista.messages;
+  return (convActual && convActual.messages) || [];
+}
+
 function pintarMensajes() {
   const box = $("messages");
   box.innerHTML = "";
-  const msgs = (convActual && convActual.messages) || [];
+  const msgs = _mensajesActivos();
   if (!msgs.length) {
     box.innerHTML = `<div class="welcome">
       <div class="welcome-logo"></div>
@@ -110,19 +155,30 @@ function pintarMensajes() {
       con tu configuración y tu memoria.</p>
     </div>`;
   }
-  for (const m of msgs) agregarBurbuja(m.role, m.text, false);
+  for (const m of msgs) agregarBurbuja(m.role, m.text, false, m.fecha);
+
+  $("chat-title").textContent = sesionVista
+    ? `${sesionVista.title} (sesión, solo lectura)`
+    : ((convActual && convActual.title) || "Nueva conversación");
   box.scrollTop = box.scrollHeight;
 }
 
-function agregarBurbuja(role, text, scroll = true) {
+function agregarBurbuja(role, text, scroll = true, fecha = "") {
   const box = $("messages");
   const wel = box.querySelector(".welcome");
   if (wel) wel.remove();
   const div = document.createElement("div");
-  div.className = `msg msg-${role}`;
+  // FIX principal: .msg.user / .msg.assistant (matchea el CSS) y el texto
+  // va dentro de .msg-content (donde el CSS aplica fondo/borde/código).
+  div.className = `msg ${role}`;
+  const hora = fecha || new Date().toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
   div.innerHTML =
     `<div class="msg-avatar">${role === "user" ? "TÚ" : "AE"}</div>` +
-    `<div class="msg-body">${renderTexto(text)}</div>`;
+    `<div class="msg-body">` +
+      `<div class="msg-meta"><span class="who">${role === "user" ? "Vos" : "Aether"}</span>` +
+      `<span>${escapeHtml(hora)}</span></div>` +
+      `<div class="msg-content">${renderTexto(text)}</div>` +
+    `</div>`;
   box.appendChild(div);
   if (scroll) box.scrollTop = box.scrollHeight;
   return div;
@@ -131,6 +187,252 @@ function agregarBurbuja(role, text, scroll = true) {
 function tituloDe(texto) {
   const t = texto.trim().replace(/\s+/g, " ");
   return t.length > 40 ? `${t.slice(0, 40)}…` : (t || "Nueva conversación");
+}
+
+/* ════════════ Panel ACTIVIDAD (port de tui/widgets/plan_panel.py) ════
+   Consume el delta de los eventos "node" del SSE (/api/chat/stream). */
+
+const ICONOS_TOOL = {
+  text: "💬", web: "🔍", shell: "🖥️", launch: "🚀",
+  vision: "👁️", codigo: "💻", memory: "🧩",
+  file_write: "💾", extract: "🧹", mcp: "🔌",
+  computer_use: "🖱️",
+  fs_write: "💾", fs_read: "📖", fs_mkdir: "📁", fs_list: "📂",
+};
+
+const ETIQUETAS_TOOL = {
+  fs_write: "Escribiendo archivo", fs_read: "Leyendo archivo",
+  fs_mkdir: "Creando carpeta", fs_list: "Listando carpeta",
+  file_write: "Guardando archivo", shell: "Ejecutando comando",
+  codigo: "Generando código", web: "Buscando en la web",
+  vision: "Analizando pantalla", mcp: "Llamando MCP",
+  computer_use: "Controlando interfaz", launch: "Abriendo app",
+  memory: "Gestionando memoria", text: "Respondiendo",
+};
+
+function resumirArgs(args) {
+  if (!args || typeof args !== "object") return "";
+  const files = args.files;
+  if (Array.isArray(files) && files.length) {
+    const rutas = files.slice(0, 3).map((f) =>
+      String((f && (f.path || f.filename)) || "?"));
+    const extra = files.length > 3 ? ` (+${files.length - 3} más)` : "";
+    return `${files.length} archivos: ${rutas.join(", ")}${extra}`;
+  }
+  for (const clave of ["path", "filename", "command", "query", "app", "instruccion"]) {
+    const val = args[clave];
+    if (typeof val === "string" && val.trim()) {
+      const v = val.trim();
+      return v.length > 80 ? v.slice(0, 80) + "…" : v;
+    }
+  }
+  return "";
+}
+
+function lineaDePaso(tool, args, resultado) {
+  const icono = ICONOS_TOOL[tool] || "•";
+  const etiqueta = ETIQUETAS_TOOL[tool] || tool;
+  const detalle = resumirArgs(args);
+  let linea = `${icono} ${etiqueta}`;
+  if (detalle) linea += ` → ${detalle}`;
+  if (typeof resultado === "string" && resultado.trim()) {
+    let primera = resultado.trim().split("\n", 1)[0];
+    if (primera.length > 90) primera = primera.slice(0, 90) + "…";
+    if (tool === "fs_read") {
+      linea += ` (${resultado.length} caracteres)`;
+    } else if (tool === "fs_list") {
+      const n = resultado.trim().split("\n").filter((l) => l.trim()).length;
+      linea += ` (${n} entradas)`;
+    } else {
+      linea += ` — ${primera}`;
+    }
+  } else if (tool === "fs_read" && typeof resultado === "string") {
+    linea += ` (${resultado.length} caracteres)`;
+  }
+  return linea;
+}
+
+const planState = {
+  pasos: [], index: 0, activo: false, actividad: [], firmas: new Set(),
+};
+const MAX_ACTIVIDAD = 8;
+
+function resetPlanTurno() {
+  planState.pasos = [];
+  planState.index = 0;
+  planState.activo = false;
+  planState.actividad = [];
+  planState.firmas = new Set();
+  repintarPlan();
+}
+
+function agregarActividad(linea) {
+  linea = stripAnsi(linea).trim();
+  if (!linea) return;
+  if (planState.actividad[planState.actividad.length - 1] === linea) return;
+  planState.actividad.push(linea);
+  if (planState.actividad.length > MAX_ACTIVIDAD) {
+    planState.actividad = planState.actividad.slice(-MAX_ACTIVIDAD);
+  }
+}
+
+function actualizarPlanDelta(nodo, delta) {
+  if (!delta || typeof delta !== "object") return;
+  const key = (nodo || "").split(".").pop();
+
+  if (key === "planner") {
+    if (Array.isArray(delta.plan_pasos)) planState.pasos = delta.plan_pasos;
+    if (Number.isInteger(delta.plan_index)) planState.index = delta.plan_index;
+    if (typeof delta.plan_activo === "boolean") planState.activo = delta.plan_activo;
+    repintarPlan();
+    return;
+  }
+
+  if (key === "plan_executor") {
+    const tool = delta.tool_actual || delta.herramienta || "?";
+    let args = {};
+    try {
+      const idx = (Number.isInteger(delta.plan_index) ? delta.plan_index : 0) - 1;
+      const paso = planState.pasos[idx];
+      if (paso && typeof paso === "object") args = paso.args || {};
+    } catch { /* noop */ }
+    let resultado = delta.fs_result || delta.shell_output || "";
+    if (typeof resultado === "string" && resultado.length > 400) {
+      resultado = resultado.slice(0, 400);
+    }
+    agregarActividad(lineaDePaso(String(tool), args, resultado));
+    if (Number.isInteger(delta.plan_index)) planState.index = delta.plan_index;
+    repintarPlan();
+    return;
+  }
+
+  if (key === "agent_loop") {
+    const pasos = delta.agent_pasos_log;
+    if (Array.isArray(pasos)) {
+      for (const paso of pasos) {
+        if (!paso || typeof paso !== "object") continue;
+        const firma = `${paso.tool}|${JSON.stringify(paso.args)}|${String(paso.resultado || "").slice(0, 80)}`;
+        if (planState.firmas.has(firma)) continue;
+        planState.firmas.add(firma);
+        agregarActividad(lineaDePaso(String(paso.tool || "?"), paso.args || {}, paso.resultado || ""));
+      }
+      if (planState.firmas.size > 64) {
+        planState.firmas = new Set([...planState.firmas].slice(-64));
+      }
+      repintarPlan();
+    }
+    return;
+  }
+
+  if (Array.isArray(delta.plan_pasos)) {
+    planState.pasos = delta.plan_pasos;
+    repintarPlan();
+  }
+}
+
+function repintarPlan() {
+  const panel = $("plan-panel");
+  const ulPasos = $("plan-steps");
+  const ulAct = $("activity-lines");
+  const hayPasos = planState.pasos.length > 0;
+  const hayAct = planState.actividad.length > 0;
+  const planificando = planState.activo && !hayPasos;
+
+  panel.hidden = !(hayPasos || hayAct || planificando) || !streamingActivo;
+
+  ulPasos.innerHTML = "";
+  planState.pasos.forEach((paso, i) => {
+    const tool = (paso && typeof paso === "object") ? String(paso.tool || "?") : String(paso);
+    const icono = ICONOS_TOOL[tool] || "•";
+    const completado = (i + 1) <= planState.index;
+    const li = document.createElement("li");
+    li.className = completado ? "completado"
+      : ((i + 1) === planState.index + 1 && planState.activo ? "en-curso" : "pendiente");
+    li.innerHTML = `<span class="paso-check">${completado ? "✓" : "○"}</span>${icono} ${escapeHtml(tool)}`;
+    ulPasos.appendChild(li);
+  });
+  if (planificando) {
+    const li = document.createElement("li");
+    li.className = "pendiente";
+    li.textContent = "planificando…";
+    ulPasos.appendChild(li);
+  }
+
+  ulAct.innerHTML = "";
+  for (const linea of planState.actividad) {
+    const li = document.createElement("li");
+    li.textContent = linea;
+    ulAct.appendChild(li);
+  }
+}
+
+/* ════════════ Panel LOGS (port del DebugPanel de la TUI) ════════════ */
+
+const LOG_MAX = 250;
+let logTotal = 0;
+
+function agregarLogLinea(texto, esError = false) {
+  const limpio = stripAnsi(texto).trim();
+  if (!limpio) return;
+  const box = $("log-lines");
+  const div = document.createElement("div");
+  div.className = "log-line" + (esError ? " error" : "");
+  div.textContent = limpio;
+  box.appendChild(div);
+  while (box.childElementCount > LOG_MAX) box.removeChild(box.firstChild);
+  logTotal += 1;
+  $("log-count").textContent = String(logTotal);
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ═══════════ Sesiones del runtime (memoria.db — como /sesiones de la TUI) ═ */
+
+async function cargarSesiones() {
+  try {
+    const r = await (await api("/api/sessions")).json();
+    sesiones = r.ok ? (r.sessions || []) : [];
+  } catch {
+    sesiones = [];
+  }
+  pintarSessionList();
+}
+
+function pintarSessionList() {
+  const ul = $("session-list");
+  ul.innerHTML = "";
+  $("sesiones-count").textContent = sesiones.length ? `${sesiones.length}` : "";
+  for (const s of sesiones) {
+    const li = document.createElement("li");
+    li.title = `${s.inicio}\n${s.turnos} turnos`;
+    if (sesionVista && sesionVista.id === s.sesion_id) li.classList.add("active");
+    const fecha = String(s.inicio || "").slice(5, 16);
+    const preview = s.preview || "(sin mensajes de usuario)";
+    li.innerHTML =
+      `<span class="ses-meta">[${escapeHtml(fecha)}]</span> ${escapeHtml(preview)}`;
+    li.addEventListener("click", () => abrirSesion(s.sesion_id));
+    ul.appendChild(li);
+  }
+  if (!sesiones.length) {
+    ul.innerHTML = '<li class="muted">(sin sesiones)</li>';
+  }
+}
+
+async function abrirSesion(id) {
+  try {
+    const r = await (await api(`/api/sessions/${encodeURIComponent(id)}`)).json();
+    if (!r.ok) throw new Error(r.error || "fallo al cargar la sesión");
+    const s = sesiones.find((x) => x.sesion_id === id);
+    sesionVista = {
+      id,
+      title: s && s.preview ? tituloDe(s.preview) : `Sesión ${id}`,
+      messages: r.messages || [],
+    };
+    pintarMensajes();
+    pintarSessionList();
+    pintarConvList();
+  } catch (err) {
+    toast(`No se pudo abrir la sesión: ${err.message}`, false);
+  }
 }
 
 /* ══════════════════════════ Chat con streaming ══════════════════════════ */
@@ -144,6 +446,7 @@ function setBusy(on) {
   if (!on) {
     $("activity-chip").hidden = true;
     $("activity-log").hidden = true;
+    $("plan-panel").hidden = true;
   }
 }
 
@@ -151,23 +454,34 @@ async function enviar() {
   const input = $("input");
   const texto = input.value.trim();
   if (!texto || streamingActivo) return;
+
+  /* Si se estaba viendo una sesión archivada del runtime (solo lectura),
+     el nuevo mensaje inicia una conversación nueva — igual que la TUI:
+     la sesión vieja queda disponible para consulta. */
+  if (sesionVista) {
+    sesionVista = null;
+    nuevaConversacion(true);
+  }
+
   input.value = "";
   autoResize();
 
   if (!convActual) nuevaConversacion(true);
   if (convActual.title === "Nueva conversación") {
     convActual.title = tituloDe(texto);
-    $("chat-title").textContent = convActual.title;
   }
 
   convActual.messages.push({ role: "user", text: texto });
   agregarBurbuja("user", texto);
   persistirConvs();
   pintarConvList();
+  pintarMensajes();  // refresca el título del chat
+
+  resetPlanTurno();
   setBusy(true);
 
   const burbuja = agregarBurbuja("assistant", "…");
-  const bodyEl = burbuja.querySelector(".msg-body");
+  const contentEl = burbuja.querySelector(".msg-content");
   let acumulado = "";
 
   const setActividad = (t) => {
@@ -207,21 +521,27 @@ async function enviar() {
 
           if (ev.type === "token") {
             acumulado += ev.data;
-            bodyEl.innerHTML = renderTexto(acumulado);
+            contentEl.innerHTML = renderTexto(acumulado);
             $("messages").scrollTop = $("messages").scrollHeight;
           } else if (ev.type === "node") {
-            setActividad(`nodo: ${ev.node}`);
+            /* Estado humano (mismo mapa que la TUI, lo arma el backend). */
+            setActividad(ev.estado || `nodo: ${ev.node}`);
+            actualizarPlanDelta(ev.node, ev.delta);
           } else if (ev.type === "log") {
+            agregarLogLinea(ev.data);
             const log = $("activity-log");
             log.hidden = false;
             log.textContent = ev.data.slice(0, 160);
           } else if (ev.type === "done") {
+            /* Ya viene limpia del backend (limpiar_respuesta_chat, la misma
+               función que usa la TUI para su respuesta final). */
             acumulado = ev.response || acumulado || "Operación completada.";
-            bodyEl.innerHTML = renderTexto(acumulado);
+            contentEl.innerHTML = renderTexto(acumulado);
           } else if (ev.type === "error") {
             acumulado = `⚠️ ${ev.message}`;
-            burbuja.classList.add("msg-error");
-            bodyEl.innerHTML = renderTexto(acumulado);
+            burbuja.classList.add("error");  // FIX: clase .error (existe en CSS)
+            contentEl.innerHTML = renderTexto(acumulado);
+            agregarLogLinea(ev.message, true);
           }
         }
       }
@@ -231,15 +551,18 @@ async function enviar() {
       acumulado += "\n\n⏹ *cancelado*";
     } else {
       acumulado = `⚠️ Sin conexión con el backend: ${err.message}`;
-      burbuja.classList.add("msg-error");
+      burbuja.classList.add("error");
+      agregarLogLinea(`Error de conexión: ${err.message}`, true);
     }
-    bodyEl.innerHTML = renderTexto(acumulado);
+    contentEl.innerHTML = renderTexto(acumulado);
   } finally {
     convActual.messages.push({ role: "assistant", text: acumulado });
     persistirConvs();
     setBusy(false);
     abortStream = null;
     refrescarStatus();
+    /* La respuesta ya quedó registrada en memoria: refrescar sesiones. */
+    cargarSesiones();
   }
 }
 
@@ -255,21 +578,26 @@ async function refrescarStatus() {
   try {
     const st = await (await api("/api/status")).json();
     const online = st.agent_status === "online" || st.status === "ready";
-    $("status-dot").className = `status-dot ${online ? "on" : "off"}`;
-    $("status-text").textContent = online ? "online" : (st.status || "offline");
-    $("rt-dot").className = `rt-dot ${online ? "on" : "off"}`;
-    $("rt-sub").textContent = online ? "Motor LangGraph listo" : "inicializando…";
+    /* FIX: el CSS define .online / .offline / .busy (antes se usaban
+       clases inexistentes on/off y el dot quedaba siempre gris). */
+    const dotCls = st.busy ? "busy" : (online ? "online" : "offline");
+    $("status-dot").className = `status-dot ${dotCls}`;
+    $("status-text").textContent = st.busy ? "ocupado" : (online ? "online" : (st.status || "offline"));
+    $("rt-dot").className = `rt-dot ${dotCls}`;
+    $("rt-sub").textContent = st.busy
+      ? "Procesando una orden…"
+      : (online ? "Motor LangGraph listo" : "inicializando…");
     $("status-model").textContent = st.model || "—";
     $("status-host").textContent = st.ollama || "—";
     $("rt-model").textContent = st.model || "—";
     $("rt-host").textContent = st.ollama || "—";
     $("rt-mem").textContent = (st.memory_size ?? "—");
     $("rt-version").textContent = st.version || "—";
-    $("chat-sub").textContent = `Local · ${st.model || "—"}`;
+    if (!sesionVista) $("chat-sub").textContent = `Local · ${st.model || "—"}`;
   } catch {
-    $("status-dot").className = "status-dot off";
+    $("status-dot").className = "status-dot offline";
     $("status-text").textContent = "backend offline";
-    $("rt-dot").className = "rt-dot off";
+    $("rt-dot").className = "rt-dot offline";
   }
   try {
     const r = await (await api("/api/config")).json();
@@ -318,6 +646,7 @@ $("model-select").addEventListener("change", async (e) => {
     })).json();
     toast(r.ok ? `Modelo activo: ${modelo}` : "Validación rechazó el modelo", r.ok);
     refrescarStatus();
+    cargarModelos();  // re-marcar el activo
   } catch (err) { toast(`Error: ${err.message}`, false); }
 });
 
@@ -370,7 +699,7 @@ async function guardarConfigTUI() {
       .filter(([, v]) => !v).map(([k]) => k);
     if (r.ok) {
       st.textContent = "✅ guardado";
-      toast("Configuración aplicada (config.json) — la TUI la ve al arrancar");
+      toast("Configuración aplicada (config.json) — vale desde el próximo turno");
     } else {
       st.textContent = `⚠️ falló: ${fallidas.join(", ")}`;
       toast(`Validación rechazó: ${fallidas.join(", ")}`, false);
@@ -466,12 +795,17 @@ $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); }
 });
 $("input").addEventListener("input", autoResize);
-$("btn-new-chat").addEventListener("click", () => nuevaConversacion());
+$("btn-new-chat").addEventListener("click", () => {
+  sesionVista = null;
+  pintarSessionList();
+  nuevaConversacion();
+});
 $("btn-settings").addEventListener("click", abrirSettings);
 $("btn-models").addEventListener("click", () => {
   cargarModelos();
   toast("Modelos actualizados");
 });
+$("btn-refresh-sessions").addEventListener("click", cargarSesiones);
 $("btn-close-settings").addEventListener("click", cerrarSettings);
 $("settings-modal").addEventListener("click", (e) => {
   if (e.target === $("settings-modal")) cerrarSettings();
@@ -490,5 +824,7 @@ convActual = conversaciones[0];
 pintarConvList();
 pintarMensajes();
 cargarModelos();
+cargarSesiones();
 refrescarStatus();
 setInterval(refrescarStatus, 6000);
+setInterval(cargarSesiones, 30000);

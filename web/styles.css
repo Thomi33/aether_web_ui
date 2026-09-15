@@ -125,6 +125,33 @@ code {
   color: var(--text);
   border: 1px solid var(--border-2);
 }
+#conv-list li { display: flex; align-items: center; gap: 6px; }
+#conv-list li .conv-title {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#conv-list li .del {
+  flex-shrink: 0; opacity: 0; color: var(--muted);
+  padding: 0 4px; border-radius: 4px; font-size: 11px;
+}
+#conv-list li:hover .del { opacity: 1; }
+#conv-list li .del:hover { color: var(--danger); background: rgba(255, 107, 107, 0.1); }
+
+/* ═══ SESIONES DEL RUNTIME (memoria.db vía /api/sessions) ═══ */
+#session-list { list-style: none; }
+#session-list li {
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#session-list li:hover { background: var(--bg-3); color: var(--text); }
+#session-list li.active { background: var(--bg-3); color: var(--text); border: 1px solid var(--border-2); }
+#session-list li .ses-meta { font-family: var(--mono); font-size: 10px; }
+.nav-item.small { font-size: 11px; font-family: var(--mono); padding: 4px 10px; }
 
 .sidebar-section { display: flex; flex-direction: column; }
 
@@ -426,6 +453,61 @@ code {
 .kv b.on { color: var(--accent); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ═══ PANEL ACTIVIDAD (port del PlanPanel de la TUI) ═══ */
+#plan-panel:empty, #plan-panel[hidden] { display: none; }
+.plan-steps, .activity-lines { list-style: none; }
+.plan-steps li {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plan-steps li.pendiente { opacity: 0.55; }
+.plan-steps li.completado { color: var(--accent); }
+.plan-steps li.en-curso { color: var(--text); }
+.plan-steps li .paso-check { margin-right: 5px; }
+.activity-lines { margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 6px; }
+.activity-lines li {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 3px 0;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.activity-lines li::before { content: "▶ "; color: var(--accent-dim); }
+.activity-lines li.error { color: #ffb3b3; }
+
+/* ═══ PANEL LOGS (port del DebugPanel de la TUI) ═══ */
+#log-panel summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  list-style: none;
+  user-select: none;
+}
+#log-panel summary::before { content: "▸ "; }
+#log-panel[open] summary { content: ""; }
+#log-panel[open] summary::before { content: "▾ "; }
+.log-lines {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.log-lines .log-line { padding: 1px 0; border-bottom: 1px dotted var(--border); }
+.log-lines .log-line:last-child { border-bottom: none; }
+.log-lines .log-line.error { color: #ffb3b3; }
 
 /* ═══════════ MODAL ═══════════ */
 .modal-backdrop {

@@ -36,6 +36,7 @@ La UI no asume nada del backend más allá de estos endpoints (proyecto Aether,
 | `/api/health` | GET | Estado del API y de Ollama (status card). |
 | `/api/status` | GET | Modelo activo, host, `NUM_CTX`, `TEMPERATURE`, flags del prompt. |
 | `/api/chat/stream` | POST | Chat con streaming SSE (`token`, `node`, `log`, `done`, `error`). |
+| `/ws/chat` | WS | Socket directo: mismo contrato de eventos, multi-mensaje por conexión. |
 | `/api/stop` | POST | Aborta la generación en curso. |
 | `/api/config` | GET / POST | Lee/guarda la config de la TUI (misma validación que `ConfigManager`). |
 | `/api/system-prompt` | GET / POST | Lee/guarda las 3 claves del system prompt. |
@@ -44,8 +45,14 @@ La UI no asume nada del backend más allá de estos endpoints (proyecto Aether,
 
 ## 🚀 Cómo se sirve
 
-El backend de Aether sirve esta carpeta como estático. Orden de resolución en
-`backend/core/config.py` → `resolver_web_ui_dir()`:
+El camino simple (instalado con el instalador o a mano):
+
+```bash
+aether web     # levanta el backend y abre el navegador — aliases: aether server / aether gateway
+```
+
+También manual: el backend de Aether sirve esta carpeta como estático. Orden de
+resolución en `backend/core/config.py` → `resolver_web_ui_dir()`:
 
 1. `WEB_UI_DIR` (variable de entorno o `backend/.env`)
 2. `~/aether_web_ui/web` ← **este repo en su ruta por defecto**
