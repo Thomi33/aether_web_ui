@@ -12,6 +12,6 @@ STAGE="$(mktemp -d)"
 cp -r "$DIR/web/." "$STAGE/"
 sed -i "s|<script src=\"app.js\"></script>|<script>window.AETHER_API_BASE=\"$API\";</script>\n    <script src=\"app.js\"></script>|" "$STAGE/index.html"
 
-echo "️  Aether Web UI (dev): http://localhost:$PORT"
-echo " API apuntando a:      $API"
+echo "🎨 Aether Web UI (dev): http://localhost:$PORT"
+echo "🔌 API apuntando a:      $API"
 cd "$STAGE" && exec python3 -m http.server "$PORT" --bind 127.0.0.1

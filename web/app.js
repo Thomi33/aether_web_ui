@@ -7,6 +7,11 @@
 
 const $ = (id) => document.getElementById(id);
 
+/* Base de la API. Vacío = mismo origen (el backend sirve esta carpeta).
+   En desarrollo con un servidor estático aparte (serve.sh) se inyecta
+   window.AETHER_API_BASE = "http://localhost:8000". */
+const API_BASE = (window.AETHER_API_BASE || "").replace(/\/+$/, "");
+
 /* ── Estado ── */
 let conversaciones = [];
 let convActual = null;
@@ -43,7 +48,7 @@ function toast(msg, ok = true) {
 }
 
 async function api(path, opts) {
-  const resp = await fetch(path, opts);
+  const resp = await fetch(`${API_BASE}${path}`, opts);
   if (!resp.ok && !(opts && opts._sse)) throw new Error(`HTTP ${resp.status}`);
   return resp;
 }
@@ -172,7 +177,7 @@ async function enviar() {
 
   try {
     abortStream = new AbortController();
-    const resp = await fetch("/api/chat/stream", {
+    const resp = await fetch(`${API_BASE}/api/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: texto }),
@@ -452,7 +457,7 @@ document.querySelectorAll(".modal-tabs .tab").forEach((tab) => {
 $("btn-send").addEventListener("click", enviar);
 $("btn-stop").addEventListener("click", async () => {
   try {
-    await fetch("/api/stop", { method: "POST" });
+    await fetch(`${API_BASE}/api/stop`, { method: "POST" });
     toast("Cancelando inferencia…");
   } catch { /* igual abortamos localmente */ }
   if (abortStream) abortStream.abort();
