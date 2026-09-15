@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aether — Workspace</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230e1513'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%232ce5c4'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ═══════════════ SIDEBAR ═══════════════ -->
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="brand-logo"></span>
+        <span class="brand-name">Aether</span>
+        <span class="badge badge-local">● LOCAL</span>
+      </div>
+
+      <button id="btn-new-chat" class="btn-new-chat" title="Nueva conversación">
+        <span class="plus">+</span> Nueva conversación
+      </button>
+
+      <nav class="conv-section">
+        <div class="section-label">CONVERSACIONES</div>
+        <ul id="conv-list"></ul>
+      </nav>
+
+      <div class="sidebar-section">
+        <div class="section-label">WORKSPACE</div>
+        <div class="nav-item disabled" title="Disponible próximamente">▤ Proyectos</div>
+        <div class="nav-item disabled" title="Disponible próximamente">◈ Memoria</div>
+        <div class="nav-item disabled" title="Disponible próximamente">✦ Skills</div>
+        <div class="nav-item disabled" title="Disponible próximamente">◎ Tareas</div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="section-label">SYSTEM</div>
+        <div class="nav-item" id="btn-settings">⚙︎ Settings</div>
+        <div class="nav-item" id="btn-models">▣ Modelos</div>
+      </div>
+
+      <div class="status-card" id="status-card">
+        <div class="status-title">
+          <span class="brand-logo small"></span>
+          <strong>Aether</strong>
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-text" class="status-text">…</span>
+        </div>
+        <div class="status-row muted" id="status-model">cargando…</div>
+        <div class="status-row muted" id="status-host">—</div>
+      </div>
+    </aside>
+
+    <!-- ═══════════════ CHAT ═══════════════ -->
+    <main id="chat">
+      <header id="chat-header">
+        <div class="chat-title-wrap">
+          <span class="brand-logo small"></span>
+          <div>
+            <h1 id="chat-title">Nueva conversación</h1>
+            <div class="chat-sub" id="chat-sub">Local · —</div>
+          </div>
+        </div>
+        <div class="chat-header-right">
+          <span class="chip chip-idle" id="busy-chip" hidden>● ocupado</span>
+        </div>
+      </header>
+
+      <!-- Contenedor de mensajes: lo pinta app.js (.msg / .welcome) -->
+      <div id="messages"></div>
+
+      <footer id="composer">
+        <div id="activity-chip" hidden>
+          <span class="activity-spinner"></span>
+          <span id="activity-text">Iniciando…</span>
+          <span class="activity-log muted" id="activity-log" hidden></span>
+        </div>
+        <div class="composer-box">
+          <textarea id="input" rows="1" placeholder="Preguntale lo que quieras a Aether…"
+                    autocomplete="off"></textarea>
+          <div class="composer-row">
+            <select id="model-select" title="Modelo activo (MODELO en config.json)">
+              <option value="">cargando modelos…</option>
+            </select>
+            <span class="hint muted">Enter envía · Shift+Enter salto de línea</span>
+            <button id="btn-stop" class="btn-stop" hidden title="Cancelar inferencia (como /stop en la TUI)">■ Stop</button>
+            <button id="btn-send" class="btn-send" title="Enviar">➤</button>
+          </div>
+        </div>
+      </footer>
+    </main>
+
+    <!-- ═══════════════ RUNTIME PANEL ═══════════════ -->
+    <aside id="runtime">
+      <div class="runtime-header">
+        <span class="rt-dot" id="rt-dot"></span>
+        <span class="section-label">AETHER RUNTIME</span>
+      </div>
+      <div class="runtime-sub muted" id="rt-sub">…</div>
+
+      <div class="panel">
+        <div class="section-label">MODEL</div>
+        <div class="kv"><span>Modelo</span><b id="rt-model">—</b></div>
+        <div class="kv"><span>Host</span><b id="rt-host">—</b></div>
+        <div class="kv"><span>Ctx (NUM_CTX)</span><b id="rt-ctx">—</b></div>
+        <div class="kv"><span>Temp</span><b id="rt-temp">—</b></div>
+        <div class="kv"><span>Turnos memoria</span><b id="rt-mem">—</b></div>
+        <div class="kv"><span>Versión</span><b id="rt-version">—</b></div>
+      </div>
+
+      <div class="panel">
+        <div class="section-label">SYSTEM PROMPT</div>
+        <div class="kv"><span>Override</span><b id="rt-sp-override">off</b></div>
+        <div class="kv"><span>Extra</span><b id="rt-sp-extra">off</b></div>
+        <div class="kv"><span>Síntesis extra</span><b id="rt-sp-sintesis">off</b></div>
+      </div>
+
+      <div class="panel">
+        <div class="section-label">ENVIRONMENT</div>
+        <div class="chips">
+          <span class="chip">Linux</span>
+          <span class="chip chip-teal">LOCAL</span>
+          <span class="chip">Ollama</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ═══════════════ SETTINGS MODAL ═══════════════ -->
+  <div id="settings-modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button class="btn-close" id="btn-close-settings">✕</button>
+      </div>
+      <div class="modal-tabs">
+        <button class="tab active" data-tab="tab-tui">Terminal (TUI)</button>
+        <button class="tab" data-tab="tab-prompt">System Prompt</button>
+      </div>
+
+      <!-- Tab 1: config.json (la misma de la TUI) -->
+      <div class="tab-body" id="tab-tui">
+        <p class="muted small">Los cambios se escriben en <code>config.json</code> con la misma
+          validación que la TUI. La TUI los ve en su próximo arranque.</p>
+        <div class="form-grid">
+          <label>OLLAMA_HOST <input id="cfg-OLLAMA_HOST" type="text"></label>
+          <label>SEARXNG_URL <input id="cfg-SEARXNG_URL" type="text"></label>
+          <label>TEMPERATURE (0.0–2.0) <input id="cfg-TEMPERATURE" type="number" step="0.05" min="0" max="2"></label>
+          <label>MAX_TOKENS <input id="cfg-MAX_TOKENS" type="number" min="1" max="8192"></label>
+          <label>NUM_PREDICT <input id="cfg-NUM_PREDICT" type="number" min="1" max="65536"></label>
+          <label>NUM_CTX (4096–262144) <input id="cfg-NUM_CTX" type="number" min="4096" max="262144"></label>
+          <label>TIMEOUT_CMD (10–300 s) <input id="cfg-TIMEOUT_CMD" type="number" min="10" max="300"></label>
+          <label>MAX_TURNOS_CONTEXTO <input id="cfg-MAX_TURNOS_CONTEXTO" type="number" min="0"></label>
+          <label class="checkbox-row">
+            <input id="cfg-MODO_AUTONOMO" type="checkbox"> MODO_AUTONOMO
+          </label>
+          <label class="checkbox-row">
+            <input id="cfg-TOOL_CALLING_NATIVO" type="checkbox"> TOOL_CALLING_NATIVO
+          </label>
+        </div>
+        <div class="modal-actions">
+          <span class="muted small" id="tui-save-status"></span>
+          <button class="btn-primary" id="btn-save-tui">Guardar</button>
+        </div>
+      </div>
+
+      <!-- Tab 2: system prompt -->
+      <div class="tab-body" id="tab-prompt" hidden>
+        <p class="muted small">
+          <b>override</b> reemplaza la persona por defecto (la memoria se sigue agregando) ·
+          <b>extra</b> se agrega a todos los prompts con máxima prioridad ·
+          <b>sintesis_extra</b> solo para la persona de síntesis. Vacío = deshabilitado.
+        </p>
+        <label>SYSTEM_PROMPT_OVERRIDE
+          <textarea id="sp-override" rows="5" placeholder="(vacío = persona por defecto)"></textarea>
+        </label>
+        <label>SYSTEM_PROMPT_EXTRA
+          <textarea id="sp-extra" rows="5" placeholder="(vacío = nada extra)"></textarea>
+        </label>
+        <label>SYSTEM_PROMPT_SINTESIS_EXTRA
+          <textarea id="sp-sintesis" rows="3"></textarea>
+        </label>
+        <div class="modal-actions">
+          <span class="muted small" id="prompt-save-status"></span>
+          <button class="btn-ghost" id="btn-preview-prompt">Preview</button>
+          <button class="btn-primary" id="btn-save-prompt">Guardar</button>
+        </div>
+        <div id="prompt-preview" class="prompt-preview" hidden></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# ─ Python ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ── Logs / temporales ──
+*.log
+*.tmp
+.DS_Store
+
+# ─ Editores ──
+.vscode/
+.idea/
