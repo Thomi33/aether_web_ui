@@ -10,19 +10,49 @@ backend FastAPI de Aether mediante SSE para streaming de tokens en vivo.
 
 - **Chat con streaming real (SSE)**: tokens en vivo, actividad del agente
   (`agent_loop`, tools, memoria) y botón de stop.
+- **Adjuntos 📎 (imágenes y archivos)**: se suben en base64 con el mensaje.
+  El backend los guarda en `~/Aether/adjuntos/`, embebe el contenido de los
+  archivos de texto en la orden y describe las imágenes con el modelo de
+  visión (`MODELO_VISION`). Aether también los puede releer después con sus
+  tools de filesystem.
 - **Configuración de la TUI desde la web**: edita la *misma* `config.json` que
   usa la TUI (`OLLAMA_HOST`, `SEARXNG_URL`, `TEMPERATURE`, `MAX_TOKENS`,
   `NUM_PREDICT`, `NUM_CTX`, `TIMEOUT_CMD`, `MAX_TURNOS_CONTEXTO`,
   `MODO_AUTONOMO`, `TOOL_CALLING_NATIVO`) con la validación idéntica del
   `ConfigManager`. La TUI lo ve en su próximo arranque.
+- **Workspace modal** (sidebar ▸ WORKSPACE/SYSTEM; cada sección abre su tab):
+  - **▤ Proyectos**: registro de proyectos (nombre + ruta + descripción) en
+    `~/Aether/proyectos.json`.
+  - **◈ Memoria**: el **resumen acumulativo** que Aether recuerda (rolling
+    summary de la DB) editable en caliente + botón *Consolidar ahora*
+    (equivalente a `/memory` de la TUI) + ABM de **recuerdos** permanentes
+    (hechos con categoría e importancia).
+  - **✦ Skills**: catálogo de `skills/<nombre>/SKILL.md`, ver contenido,
+    crear y borrar.
+  - **◎ Tareas**: lista simple (pendiente / en curso / hecha) en
+    `~/Aether/tareas.json`.
+  - **🔌 MCPs**: toggle activar/desactivar (el `/mcps` de la TUI), ver las
+    tools que expone cada server, **agregar MCP custom** (stdio: command, args
+    y `env` línea-por-línea). Los valores de `env` (tokens) viajan
+    **enmascarados**: la API nunca los devuelve en claro y un valor enmascarado
+    al guardar conserva el secreto real.
+  - **🎮 Roblox**: iniciar/detener el runtime autónomo con proveedor de visión
+    (`hybrid`/`google`/`ollama`) — el `/play-roblox` de la TUI.
+  - **⚡ Effort & Agente**: nivel de esfuerzo low/medium/high/max con el mismo
+    mapeo a `TEMPERATURE`/`NUM_CTX`/`NUM_PREDICT` del `/effort` de la TUI
+    (efecto **inmediato**) y selector de agente build/plan (`/agents`).
 - **System prompt editable sin tocar código**:
   - `override` → reemplaza la persona por defecto.
   - `extra` → se agrega a **todos** los prompts (máxima prioridad).
   - `sintesis_extra` → solo para la persona de síntesis.
   - **Preview** en vivo de los prompts finales que verá el modelo.
+- **Cuenta y preferencias** (Settings ▸ Cuenta): perfil de usuario (nombre,
+  bio, timezone, idioma), avatar persistente y preferencias de la interfaz
+  (tema, idioma, modo compacto, notificaciones), todo guardado vía
+  `/api/account/*`.
 - **Selector de modelos** leído desde Ollama (`/api/tags`), con el activo marcado.
-- **Panel de runtime**: modelo, host, contexto, temperatura y estado de los
-  overrides de prompt.
+- **Panel de runtime**: modelo, host, contexto, temperatura, effort, agente y
+  estado de los overrides de prompt.
 - **Conversaciones** persistidas en `localStorage`, con lista lateral y borrado.
 - **Render de código**: fences ```lang, `inline`, **negrita** y saltos de línea.
 
@@ -34,14 +64,36 @@ La UI no asume nada del backend más allá de estos endpoints (proyecto Aether,
 | Endpoint | Método | Uso |
 |---|---|---|
 | `/api/health` | GET | Estado del API y de Ollama (status card). |
-| `/api/status` | GET | Modelo activo, host, `NUM_CTX`, `TEMPERATURE`, flags del prompt. |
-| `/api/chat/stream` | POST | Chat con streaming SSE (`token`, `node`, `log`, `done`, `error`). |
-| `/ws/chat` | WS | Socket directo: mismo contrato de eventos, multi-mensaje por conexión. |
+| `/api/status` | GET | Modelo activo, host, `NUM_CTX`, `TEMPERATURE`, effort, agente, flags del prompt. |
+| `/api/chat/stream` | POST | Chat con streaming SSE (`token`, `node`, `log`, `done`, `error`). Acepta `attachments: [{name, mime, data(base64)}]`. |
+| `/ws/chat` | WS | Socket directo: mismo contrato de eventos, multi-mensaje por conexión. También acepta `attachments`. |
 | `/api/stop` | POST | Aborta la generación en curso. |
 | `/api/config` | GET / POST | Lee/guarda la config de la TUI (misma validación que `ConfigManager`). |
 | `/api/system-prompt` | GET / POST | Lee/guarda las 3 claves del system prompt. |
 | `/api/system-prompt/preview` | GET | Prompt final ya compuesto (`core/agent/prompts.py`). |
 | `/api/models` | GET / POST | Lista los modelos de Ollama y cambia el activo. |
+| `/api/memory/summary` | GET / POST | Lee/edita el resumen acumulativo (rolling summary). |
+| `/api/memory/consolidate` | POST | Fuerza la consolidación con turnos pendientes (`/memory consolidar`). |
+| `/api/memory/recuerdos` | GET / POST | Lista / agrega recuerdos permanentes (categoría, importancia). |
+| `/api/memory/recuerdos/{id}` | DELETE | Borra un recuerdo. |
+| `/api/skills` | GET / POST | Lista / crea skills (`skills/<nombre>/SKILL.md`). |
+| `/api/skills/{name}` | GET / DELETE | Lee el contenido completo / borra la skill. |
+| `/api/mcps` | GET / POST | Lista servers MCP (env enmascarado) / agrega un MCP custom. |
+| `/api/mcps/{name}` | PATCH / DELETE | Edita/togglea / borra un server MCP (env enmascarado = conservar). |
+| `/api/mcps/{name}/tools` | GET | Conecta al server y lista sus tools en vivo. |
+| `/api/attachments/upload` | POST | Sube adjuntos como `multipart/form-data` (campo `files`, múltiple) antes de enviar el mensaje; el backend los guarda en `~/Aether/adjuntos/`. |
+| `/api/effort` | GET / POST | Nivel de esfuerzo (aplica temp/ctx/num_predict como `/effort`). |
+| `/api/agent` | GET / POST | Agente activo build/plan (como `/agents`). |
+| `/api/agents` | GET / POST | Lista los agentes disponibles + el activo / crea un agente custom (`name`, `description`, `system_prompt`, …). |
+| `/api/account/profile` | GET / POST | Perfil de usuario (nombre, bio, timezone, idioma). |
+| `/api/account/preferences` | GET / POST | Preferencias de la UI (tema, idioma, modo compacto, notificaciones). |
+| `/api/account/avatar` | POST | Sube el avatar como `multipart/form-data` (campo `file`). |
+| `/api/roblox` | POST | `start`/`stop`/`status` del runtime autónomo (`/play-roblox`). |
+| `/api/roblox/status` | GET | Estado del runtime (running, provider, pid). |
+| `/api/proyectos` | GET / POST | Registro de proyectos (`~/Aether/proyectos.json`). |
+| `/api/proyectos/{name}` | DELETE | Quita un proyecto del registro. |
+| `/api/tareas` | GET / POST | Lista / crea tareas (`~/Aether/tareas.json`). |
+| `/api/tareas/{id}` | PATCH / DELETE | Cambia estado/notas / borra una tarea. |
 
 ## 🚀 Cómo se sirve
 

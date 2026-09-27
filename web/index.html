@@ -15,11 +15,11 @@
       <div class="brand">
         <span class="brand-logo"></span>
         <span class="brand-name">Aether</span>
-        <span class="badge badge-local">● LOCAL</span>
+        <span class="badge badge-local">• LOCAL</span>
       </div>
 
       <button id="btn-new-chat" class="btn-new-chat" title="Nueva conversación">
-        <span class="plus">+</span> Nueva conversación
+        <span class="plus" data-lucide="plus"></span> Nueva conversación
       </button>
 
       <nav class="conv-section">
@@ -30,21 +30,24 @@
       <div class="sidebar-section">
         <div class="section-label">SESIONES AETHER <span class="muted small" id="sesiones-count"></span></div>
         <ul id="session-list"></ul>
-        <div class="nav-item small" id="btn-refresh-sessions" title="Recarga las sesiones del runtime (memoria.db)">⟳ Actualizar sesiones</div>
+        <div class="nav-item small" id="btn-refresh-sessions" title="Recarga las sesiones del runtime (memoria.db)"><span data-lucide="refresh-cw"></span> Actualizar sesiones</div>
       </div>
 
       <div class="sidebar-section">
         <div class="section-label">WORKSPACE</div>
-        <div class="nav-item disabled" title="Disponible próximamente">▤ Proyectos</div>
-        <div class="nav-item disabled" title="Disponible próximamente">◈ Memoria</div>
-        <div class="nav-item disabled" title="Disponible próximamente">✦ Skills</div>
-        <div class="nav-item disabled" title="Disponible próximamente">◎ Tareas</div>
+        <div class="nav-item" id="btn-proyectos" data-wtab="wtab-proyectos"><span data-lucide="folder-kanban"></span> Proyectos</div>
+        <div class="nav-item" id="btn-memoria" data-wtab="wtab-memoria"><span data-lucide="brain"></span> Memoria</div>
+        <div class="nav-item" id="btn-skills" data-wtab="wtab-skills"><span data-lucide="sparkles"></span> Skills</div>
+        <div class="nav-item" id="btn-tareas" data-wtab="wtab-tareas"><span data-lucide="list-todo"></span> Tareas</div>
       </div>
 
       <div class="sidebar-section">
         <div class="section-label">SYSTEM</div>
-        <div class="nav-item" id="btn-settings">⚙︎ Settings</div>
-        <div class="nav-item" id="btn-models">▣ Modelos</div>
+        <div class="nav-item" id="btn-settings"><span data-lucide="settings"></span> Settings</div>
+        <div class="nav-item" id="btn-models"><span data-lucide="cpu"></span> Modelos</div>
+        <div class="nav-item" id="btn-effort" data-wtab="wtab-effort"><span data-lucide="gauge"></span> Effort &amp; Agente</div>
+        <div class="nav-item" id="btn-mcps" data-wtab="wtab-mcps"><span data-lucide="plug"></span> MCPs</div>
+        <div class="nav-item" id="btn-roblox" data-wtab="wtab-roblox"><span data-lucide="gamepad-2"></span> Roblox</div>
       </div>
 
       <div class="status-card" id="status-card">
@@ -70,7 +73,7 @@
           </div>
         </div>
         <div class="chat-header-right">
-          <span class="chip chip-idle" id="busy-chip" hidden>● ocupado</span>
+          <span class="chip chip-idle" id="busy-chip" hidden>• ocupado</span>
         </div>
       </header>
 
@@ -84,15 +87,99 @@
           <span class="activity-log muted" id="activity-log" hidden></span>
         </div>
         <div class="composer-box">
+          <div id="attach-tray" hidden></div>
           <textarea id="input" rows="1" placeholder="Preguntale lo que quieras a Aether…"
                     autocomplete="off"></textarea>
           <div class="composer-row">
+            <div class="menu-anchor">
+              <button id="btn-attach" class="btn-attach" title="Adjuntar y más opciones"
+                      aria-haspopup="true" aria-expanded="false"><i data-lucide="plus"></i></button>
+              <input type="file" id="file-input" multiple hidden
+                     accept="image/*,.txt,.md,.py,.js,.ts,.json,.csv,.log,.sh,.yaml,.yml,.toml,.xml,.html,.css,.sql,.rs,.go,.lua,.ini,.cfg,.conf,.env,.diff">
+              <input type="file" id="photo-input" accept="image/*" hidden>
+
+              <div id="attach-menu" class="atmenu" hidden role="menu">
+                <!-- ROOT -->
+                <div class="atview" data-atview="root">
+                  <button class="am-item" data-am-action="file">
+                    <span class="am-ico" data-lucide="paperclip"></span>
+                    <span class="am-text">Adjuntar archivo</span>
+                  </button>
+                  <button class="am-item" data-am-action="photo">
+                    <span class="am-ico" data-lucide="image"></span>
+                    <span class="am-text">Foto o imagen</span>
+                  </button>
+                  <button class="am-item" data-am-action="camera">
+                    <span class="am-ico" data-lucide="camera"></span>
+                    <span class="am-text">Cámara<span class="am-sub">Toma una foto ahora</span></span>
+                  </button>
+                  <button class="am-item" data-am-action="voice">
+                    <span class="am-ico" data-lucide="mic"></span>
+                    <span class="am-text">Dictado por voz<span class="am-sub" id="am-mic-sub">Transcribe con whisper</span></span>
+                  </button>
+                  <div class="am-divider"></div>
+                  <button class="am-item" data-am-view="mcp">
+                    <span class="am-ico" data-lucide="plug"></span>
+                    <span class="am-text">MCPs<span class="am-sub" id="am-mcp-sub">…</span></span>
+                    <span class="am-chev" data-lucide="chevron-right"></span>
+                  </button>
+                  <button class="am-item" data-am-view="agents">
+                    <span class="am-ico" data-lucide="bot"></span>
+                    <span class="am-text">Agentes<span class="am-sub" id="am-agent-sub">…</span></span>
+                    <span class="am-chev" data-lucide="chevron-right"></span>
+                  </button>
+                  <button class="am-item" data-am-view="skills">
+                    <span class="am-ico" data-lucide="sparkles"></span>
+                    <span class="am-text">Skills<span class="am-sub" id="am-skill-sub">…</span></span>
+                    <span class="am-chev" data-lucide="chevron-right"></span>
+                  </button>
+                </div>
+
+                <!-- MCPs -->
+                <div class="atview" data-atview="mcp" hidden>
+                  <button class="am-back" data-am-back><i data-lucide="chevron-left"></i> MCPs</button>
+                  <div id="am-mcp-list"></div>
+                  <div class="am-divider"></div>
+                  <button class="am-item" data-am-action="mcps-manage">
+                    <span class="am-ico" data-lucide="settings"></span>
+                    <span class="am-text">Administrar servidores…</span>
+                  </button>
+                </div>
+
+                <!-- AGENTES -->
+                <div class="atview" data-atview="agents" hidden>
+                  <button class="am-back" data-am-back><i data-lucide="chevron-left"></i> Agentes</button>
+                  <div id="am-agents-list"></div>
+                  <div class="am-divider"></div>
+                  <button class="am-item" data-am-action="agent-new">
+                    <span class="am-ico" data-lucide="plus"></span>
+                    <span class="am-text">Crear agente custom…</span>
+                  </button>
+                  <button class="am-item" data-am-action="agents-manage">
+                    <span class="am-ico" data-lucide="gauge"></span>
+                    <span class="am-text">Effort &amp; Agente…</span>
+                  </button>
+                </div>
+
+                <!-- SKILLS -->
+                <div class="atview" data-atview="skills" hidden>
+                  <button class="am-back" data-am-back><i data-lucide="chevron-left"></i> Skills</button>
+                  <div id="am-skills-list"></div>
+                  <div class="am-divider"></div>
+                  <button class="am-item" data-am-action="skills-manage">
+                    <span class="am-ico" data-lucide="settings"></span>
+                    <span class="am-text">Gestionar skills…</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <button id="btn-mic" class="btn-mic" title="Dictado por voz (whisper / faster-whisper)"><i data-lucide="mic"></i></button>
             <select id="model-select" title="Modelo activo (MODELO en config.json)">
               <option value="">cargando modelos…</option>
             </select>
             <span class="hint muted">Enter envía · Shift+Enter salto de línea</span>
-            <button id="btn-stop" class="btn-stop" hidden title="Cancelar inferencia (como /stop en la TUI)">■ Stop</button>
-            <button id="btn-send" class="btn-send" title="Enviar">➤</button>
+            <button id="btn-stop" class="btn-stop" hidden title="Cancelar inferencia (como /stop en la TUI)"><i data-lucide="square"></i> Stop</button>
+            <button id="btn-send" class="btn-send" title="Enviar"><i data-lucide="send-horizontal"></i></button>
           </div>
         </div>
       </footer>
@@ -112,6 +199,8 @@
         <div class="kv"><span>Host</span><b id="rt-host">—</b></div>
         <div class="kv"><span>Ctx (NUM_CTX)</span><b id="rt-ctx">—</b></div>
         <div class="kv"><span>Temp</span><b id="rt-temp">—</b></div>
+        <div class="kv"><span>Effort</span><b id="rt-effort">—</b></div>
+        <div class="kv"><span>Agente</span><b id="rt-agent">—</b></div>
         <div class="kv"><span>Turnos memoria</span><b id="rt-mem">—</b></div>
         <div class="kv"><span>Versión</span><b id="rt-version">—</b></div>
       </div>
@@ -150,11 +239,12 @@
     <div class="modal">
       <div class="modal-header">
         <h2>Settings</h2>
-        <button class="btn-close" id="btn-close-settings">✕</button>
+        <button class="btn-close" id="btn-close-settings" aria-label="Cerrar" data-lucide="x"></button>
       </div>
       <div class="modal-tabs">
         <button class="tab active" data-tab="tab-tui">Terminal (TUI)</button>
         <button class="tab" data-tab="tab-prompt">System Prompt</button>
+        <button class="tab" data-tab="tab-account"><span data-lucide="user"></span> Cuenta</button>
       </div>
 
       <!-- Tab 1: config.json (la misma de la TUI) -->
@@ -169,7 +259,7 @@
           <label>NUM_PREDICT <input id="cfg-NUM_PREDICT" type="number" min="1" max="65536"></label>
           <label>NUM_CTX (4096–262144) <input id="cfg-NUM_CTX" type="number" min="4096" max="262144"></label>
           <label>TIMEOUT_CMD (10–300 s) <input id="cfg-TIMEOUT_CMD" type="number" min="10" max="300"></label>
-          <label>MAX_TURNOS_CONTEXTO <input id="cfg-MAX_TURNOS_CONTEXTO" type="number" min="0"></label>
+          <label>MAX_TURNOS_CONTEXTO <input id="cfg-MAX_TURNOS_CONTEXTO" type="number" min="0" max="1000"></label>
           <label class="checkbox-row">
             <input id="cfg-MODO_AUTONOMO" type="checkbox"> MODO_AUTONOMO
           </label>
@@ -181,36 +271,360 @@
           <span class="muted small" id="tui-save-status"></span>
           <button class="btn-primary" id="btn-save-tui">Guardar</button>
         </div>
+
+        <div class="section-label" style="margin-top:16px">TODOS LOS PARÁMETROS (libre)</div>
+        <p class="muted small">Los valores del instalador son solo una sugerencia
+          inicial: podés cambiar cualquier clave de la config — incluido
+          <code>OLLAMA_GEN_OPTIONS</code> (<code>num_gpu</code>,
+          <code>num_batch</code>, <code>num_thread</code>), <code>NUM_CTX</code>,
+          <code>NUM_PREDICT</code>, timeouts, etc. Se guarda en
+          <code>config.local.json</code> con efecto inmediato. Los objetos/listas
+          se editan como JSON (dejalo válido o no se guarda esa clave).</p>
+        <div id="cfg-extra-list"></div>
+        <div class="modal-actions">
+          <span class="muted small" id="cfg-extra-status"></span>
+          <button class="btn-ghost" id="btn-cfg-extra-reload">Recargar</button>
+          <button class="btn-primary" id="btn-save-cfg-extra">Guardar parámetros</button>
+        </div>
       </div>
 
-      <!-- Tab 2: system prompt -->
+      <!-- Tab 2: system prompt (arquitectura de capas, ver core/agent/prompts.py) -->
       <div class="tab-body" id="tab-prompt" hidden>
-        <p class="muted small">
-          <b>override</b> reemplaza la persona por defecto (la memoria se sigue agregando) ·
-          <b>extra</b> se agrega a todos los prompts con máxima prioridad ·
-          <b>sintesis_extra</b> solo para la persona de síntesis. Vacío = deshabilitado.
-        </p>
-        <label>SYSTEM_PROMPT_OVERRIDE
-          <textarea id="sp-override" rows="5" placeholder="(vacío = persona por defecto)"></textarea>
+        <p class="muted small">El system prompt de Aether tiene <b>3 capas en orden</b>:
+          <b>(1) instrucciones internas del agente</b> (agent loop, tool calling,
+          shell, protocolos — parte del código, NO se pueden editar) →
+          <b>(2) comportamiento predeterminado de Aether</b> (personalidad base,
+          siempre activa) → <b>(3) tu personalización</b>, que es lo único que se
+          edita acá y aplica SOLAMENTE al comportamiento conversacional
+          (personalidad, tono, estilo). No puede desactivar tools ni tocar el
+          funcionamiento interno por más que el texto lo pida.</p>
+        <label>COMPORTAMIENTO PERSONALIZADO (personalidad, tono, estilo)
+          <textarea id="sp-behavior" rows="6"
+                    placeholder="ej. Respondé ultra breve. Usá un tono más técnico. Actuá como tutor de programación."></textarea>
         </label>
-        <label>SYSTEM_PROMPT_EXTRA
-          <textarea id="sp-extra" rows="5" placeholder="(vacío = nada extra)"></textarea>
-        </label>
-        <label>SYSTEM_PROMPT_SINTESIS_EXTRA
-          <textarea id="sp-sintesis" rows="3"></textarea>
-        </label>
+        <details class="block-new">
+          <summary>Capas legadas (avanzado)</summary>
+          <p class="muted small"><b>override</b>: LEGADO — antes reemplazaba
+            TODO el prompt; ahora también queda como capa de comportamiento
+            (nunca reemplaza las instrucciones internas ni la personalidad
+            base de Aether).</p>
+          <label>SYSTEM_PROMPT_OVERRIDE (legado)
+            <textarea id="sp-override" rows="4" placeholder="(vacío)"></textarea>
+          </label>
+          <label>SYSTEM_PROMPT_EXTRA (legado)
+            <textarea id="sp-extra" rows="4" placeholder="(vacío = nada extra)"></textarea>
+          </label>
+          <label>SYSTEM_PROMPT_SINTESIS_EXTRA (solo síntesis)
+            <textarea id="sp-sintesis" rows="3"></textarea>
+          </label>
+        </details>
         <div class="modal-actions">
           <span class="muted small" id="prompt-save-status"></span>
           <button class="btn-ghost" id="btn-preview-prompt">Preview</button>
           <button class="btn-primary" id="btn-save-prompt">Guardar</button>
         </div>
+        <p class="muted small">Abajo se muestra el prompt REAL que recibe el modelo ahora (con tus overrides aplicados si los hay).</p>
         <div id="prompt-preview" class="prompt-preview" hidden></div>
+      </div>
+
+      <!-- 👤 ACCOUNT -->
+      <div class="tab-body" id="tab-account" hidden>
+        <p class="muted small">Perfil de usuario, avatar y preferencias de la interfaz.</p>
+        
+        <div class="section-label">PERFIL</div>
+        <div class="avatar-upload">
+          <img id="avatar-preview" alt="Avatar" hidden>
+          <input type="file" id="avatar-input" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+          <button class="btn-ghost" id="btn-avatar-upload" type="button"><i data-lucide="image"></i> Cambiar avatar</button>
+          <span class="muted small" id="avatar-status"></span>
+        </div>
+        <p class="muted small">El avatar solo se muestra en esta interfaz:
+          nunca se comparte con el modelo.</p>
+        <div class="form-grid">
+          <label>Nombre <input id="acc-nombre" type="text" placeholder="Tu nombre"></label>
+          <label>Bio <input id="acc-bio" type="text" placeholder="Descripción breve"></label>
+          <label>Timezone <input id="acc-timezone" type="text" placeholder="America/Argentina/Buenos_Aires"></label>
+          <label>Idioma <input id="acc-idioma" type="text" placeholder="es"></label>
+          <label>Género (con qué pronombres te habla Aether)
+            <select id="acc-genero" class="input-line">
+              <option value="">(sin especificar)</option>
+              <option value="hombre">Hombre — él/suyo</option>
+              <option value="mujer">Mujer — ella/suya</option>
+              <option value="no_binario">No binario — elle/su</option>
+              <option value="otro">Otro — pronombre a elección</option>
+            </select>
+          </label>
+          <label id="acc-pronombre-row" hidden>Pronombre a elección
+            <input id="acc-pronombre" type="text" placeholder="ej. elle/le, ze/zir…">
+          </label>
+          <label>Fecha de nacimiento
+            <input id="acc-nacimiento" type="date">
+            <span class="muted small">Aether solo la usa para saludarte el día de tu cumpleaños.</span>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <span class="muted small" id="acc-status"></span>
+          <button class="btn-primary" id="btn-save-account">Guardar perfil</button>
+        </div>
+
+        <div class="section-label" style="margin-top:16px">PREFERENCIAS UI</div>
+        <div class="form-grid">
+          <label>Tema
+            <select id="pref-tema">
+              <option value="dark">Oscuro</option>
+              <option value="light">Claro</option>
+              <option value="auto">Automático</option>
+            </select>
+          </label>
+          <label>Idioma UI
+            <select id="pref-idioma">
+              <option value="es">Español</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <label class="checkbox-row">
+            <input id="pref-compacto" type="checkbox"> Modo compacto
+          </label>
+          <label class="checkbox-row">
+            <input id="pref-notif" type="checkbox" checked> Notificaciones
+          </label>
+        </div>
+        <div class="modal-actions">
+          <span class="muted small" id="pref-status"></span>
+          <button class="btn-primary" id="btn-save-prefs">Guardar preferencias</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ WORKSPACE MODAL ═══════════════ -->
+  <div id="workspace-modal" class="modal-backdrop" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Workspace</h2>
+        <button class="btn-close" id="btn-close-workspace" aria-label="Cerrar" data-lucide="x"></button>
+      </div>
+      <div class="modal-tabs">
+        <button class="tab" data-wtab="wtab-proyectos"><span data-lucide="folder-kanban"></span> Proyectos</button>
+        <button class="tab" data-wtab="wtab-memoria"><span data-lucide="brain"></span> Memoria</button>
+        <button class="tab" data-wtab="wtab-skills"><span data-lucide="sparkles"></span> Skills</button>
+        <button class="tab" data-wtab="wtab-tareas"><span data-lucide="list-todo"></span> Tareas</button>
+        <button class="tab" data-wtab="wtab-mcps"><span data-lucide="plug"></span> MCPs</button>
+        <button class="tab" data-wtab="wtab-roblox"><span data-lucide="gamepad-2"></span> Roblox</button>
+        <button class="tab" data-wtab="wtab-effort"><span data-lucide="gauge"></span> Effort &amp; Agente</button>
+      </div>
+
+      <!-- [P] PROYECTOS -->
+      <div class="tab-body" id="wtab-proyectos" hidden>
+        <p class="muted small">Proyectos registrados (se guardan en
+          <code>~/Aether/proyectos.json</code>). Aether trabaja sobre las rutas
+          con sus tools de filesystem.</p>
+        <ul id="proyectos-list" class="item-list"></ul>
+        <div class="form-grid">
+          <label>Nombre <input id="proy-nombre" type="text" placeholder="mi-proyecto"></label>
+          <label>Ruta <input id="proy-ruta" type="text" placeholder="/home/vos/mi-proyecto"></label>
+        </div>
+        <label class="full-label">Descripción
+          <input id="proy-desc" class="input-line" type="text" placeholder="(opcional)">
+        </label>
+        <div class="modal-actions">
+          <span class="muted small" id="proy-status"></span>
+          <button class="btn-primary" id="btn-add-proyecto">Agregar proyecto</button>
+        </div>
+      </div>
+
+      <!-- [M] MEMORIA -->
+      <div class="tab-body" id="wtab-memoria" hidden>
+        <p class="muted small">El <b>resumen acumulativo</b> es lo que Aether
+          recuerda: se reescribe solo a medida que charlás (consolidación) y se
+          inyecta en cada prompt. Podés editarlo a mano acá.</p>
+        <div class="kv"><span>Último turno consolidado</span><b id="mem-turno">—</b></div>
+        <div class="kv"><span>Actualizado</span><b id="mem-fecha">—</b></div>
+        <label>RESUMEN
+          <textarea id="mem-texto" rows="9" placeholder="(todavía no hay resumen — Aether lo genera a medida que charlás)"></textarea>
+        </label>
+        <div class="modal-actions">
+          <span class="muted small" id="mem-status"></span>
+          <button class="btn-ghost" id="btn-consolidar"
+                  title="Fuerza la consolidación con los turnos pendientes (como /memory consolidar)"><i data-lucide="refresh-cw"></i> Consolidar ahora</button>
+          <button class="btn-primary" id="btn-guardar-memoria">Guardar resumen</button>
+        </div>
+        <div class="section-label" style="margin-top:14px">RECUERDOS <span class="muted small" id="rec-count"></span></div>
+        <p class="muted small">Hechos permanentes con importancia (1–10). El
+          agente los consulta por categoría cuando son relevantes.</p>
+        <ul id="recuerdos-list" class="item-list"></ul>
+        <div class="form-grid">
+          <label>Categoría <input id="rec-categoria" type="text" placeholder="ej. preferencias"></label>
+          <label>Importancia (1–10) <input id="rec-importancia" type="number" min="1" max="10" value="3"></label>
+        </div>
+        <label class="full-label">Contenido
+          <input id="rec-contenido" class="input-line" type="text" placeholder="ej. Al usuario le gusta el café sin azúcar">
+        </label>
+        <div class="modal-actions">
+          <span class="muted small" id="rec-status"></span>
+          <button class="btn-primary" id="btn-add-recuerdo">Agregar recuerdo</button>
+        </div>
+
+        <div class="section-label" style="margin-top:16px">IMPORTAR MEMORIA DE OTRA IA</div>
+        <p class="muted small">Roundtrip: 1) copiá el prompt de extracción y
+          pegáselo a la otra IA (ChatGPT, Claude, Gemini…); 2) te va a responder
+          con un JSON; 3) pegá esa respuesta abajo e importá (se guarda como
+          recuerdos, con dedupe, y el resumen se suma al de Aether).</p>
+        <div class="modal-actions" style="justify-content:flex-start">
+          <button class="btn-ghost" id="btn-mem-import-prompt">Obtener prompt de extracción</button>
+          <button class="btn-ghost" id="btn-mem-copy-prompt" hidden>Copiar prompt</button>
+        </div>
+        <pre id="mem-import-prompt" class="prompt-preview" hidden></pre>
+        <label>RESPUESTA DE LA OTRA IA (JSON)
+          <textarea id="mem-import-text" rows="6"
+                    placeholder="Pegá acá el JSON que te devolvió la otra IA (puede venir con ```json alrededor)"></textarea>
+        </label>
+        <div class="modal-actions">
+          <span class="muted small" id="mem-import-status"></span>
+          <button class="btn-primary" id="btn-mem-import">Importar memoria</button>
+        </div>
+      </div>
+
+      <!-- [*] SKILLS -->
+      <div class="tab-body" id="wtab-skills" hidden>
+        <p class="muted small">Conocimiento reutilizable que Aether carga bajo
+          demanda (carpetas <code>skills/&lt;nombre&gt;/SKILL.md</code> del
+          proyecto; se inyectan en el system prompt).</p>
+        <p class="muted small">Tip: arrastrá un <code>.md</code> (con o sin
+          frontmatter <code>name:</code>/<code>description:</code>) encima de
+          este tab para importarlo al formulario de abajo.</p>
+        <ul id="skills-list" class="item-list"></ul>
+        <pre id="skill-contenido" class="prompt-preview" hidden></pre>
+        <details class="block-new" id="skill-form-details">
+          <summary>Crear skill nueva</summary>
+          <div class="form-grid">
+            <label>Nombre <input id="skill-nombre" type="text" placeholder="mi-skill (minúsculas y guiones)"></label>
+            <label>Descripción <input id="skill-desc" type="text" placeholder="Cuándo usar esta skill (obligatoria)"></label>
+          </div>
+          <label>CONTENIDO (markdown, debajo del frontmatter)
+            <textarea id="skill-contenido-nuevo" rows="6" placeholder="# Mi skill&#10;&#10;Instrucciones, checklists, errores comunes…"></textarea>
+          </label>
+        </details>
+        <div class="modal-actions">
+          <span class="muted small" id="skill-status"></span>
+          <button class="btn-primary" id="btn-add-skill">Crear skill</button>
+        </div>
+      </div>
+      <!-- [T] TAREAS -->
+      <div class="tab-body" id="wtab-tareas" hidden>
+        <p class="muted small">Tareas pendientes (se guardan en
+          <code>~/Aether/tareas.json</code>).</p>
+        <ul id="tareas-list" class="item-list"></ul>
+        <label class="full-label">Título
+          <input id="tarea-titulo" class="input-line" type="text" placeholder="ej. Revisar el script de backup">
+        </label>
+        <label class="full-label">Notas
+          <input id="tarea-notas" class="input-line" type="text" placeholder="(opcional)">
+        </label>
+        <div class="modal-actions">
+          <span class="muted small" id="tarea-status"></span>
+          <button class="btn-primary" id="btn-add-tarea">Agregar tarea</button>
+        </div>
+      </div>
+
+      <!-- [M] MCPs -->
+      <div class="tab-body" id="wtab-mcps" hidden>
+        <p class="muted small">Servers MCP (se guardan en
+          <code>core/config/mcp_servers.json</code>, el mismo archivo que toca
+          el <code>/mcps</code> de la TUI). Los valores de <b>env</b> se
+          muestran enmascarados; al guardar sin tocarlos se conserva el valor
+          real.</p>
+        <ul id="mcps-list" class="item-list"></ul>
+        <details class="block-new" id="mcp-form-details">
+          <summary id="mcp-form-title">Agregar MCP custom</summary>
+          <div class="form-grid">
+            <label>Nombre <input id="mcp-nombre" type="text" placeholder="mi-server"></label>
+            <label>Transport <input id="mcp-transport" type="text" value="stdio" title="Por ahora solo stdio"></label>
+            <label>Command <input id="mcp-command" type="text" placeholder="npx"></label>
+            <label>Args (separados por espacio) <input id="mcp-args" type="text" placeholder="-y @org/mcp-server"></label>
+          </div>
+          <label>ENV (una por línea, formato CLAVE=valor)
+            <textarea id="mcp-env" rows="3" placeholder="API_KEY=&#10;OTRA_CLAVE="></textarea>
+          </label>
+        </details>
+        <div class="modal-actions">
+          <span class="muted small" id="mcp-status"></span>
+          <button class="btn-ghost" id="btn-mcp-cancel-edit" hidden>Cancelar edición</button>
+          <button class="btn-primary" id="btn-add-mcp">Agregar MCP</button>
+        </div>
+      </div>
+
+      <!-- [R] ROBLOX -->
+      <div class="tab-body" id="wtab-roblox" hidden>
+        <p class="muted small">Runtime autónomo de Roblox (el
+          <code>/play-roblox</code> de la TUI). Enfoca la ventana de Sober y
+          arranca el orquestador en un subproceso aparte.</p>
+        <div class="kv"><span>Estado</span><b id="roblox-estado">—</b></div>
+        <div class="kv"><span>Proveedor de visión</span><b id="roblox-provider">—</b></div>
+        <div class="kv"><span>PID</span><b id="roblox-pid">—</b></div>
+        <label>PROVEEDOR DE VISIÓN
+          <select id="roblox-provider-select" class="input-line">
+            <option value="hybrid">hybrid (Google, cae a Ollama)</option>
+            <option value="google">google</option>
+            <option value="ollama">ollama</option>
+          </select>
+        </label>
+        <div class="modal-actions">
+          <span class="muted small" id="roblox-status"></span>
+          <button class="btn-ghost" id="btn-roblox-refresh">Actualizar</button>
+          <button class="btn-ghost btn-danger-ghost" id="btn-roblox-stop"><i data-lucide="square"></i> Detener</button>
+          <button class="btn-primary" id="btn-roblox-start"><i data-lucide="play"></i> Iniciar</button>
+        </div>
+      </div>
+
+      <!-- [E] EFFORT & AGENTE -->
+      <div class="tab-body" id="wtab-effort" hidden>
+        <p class="muted small">Nivel de esfuerzo del modelo (el
+          <code>/effort</code> de la TUI): ajusta temperatura, contexto y
+          presupuesto de tokens de razonamiento. Surtie efecto
+          <b>inmediato</b>, sin reiniciar.</p>
+        <div id="effort-grid" class="effort-grid"></div>
+        <div class="section-label" style="margin-top:16px">AGENTE</div>
+        <p class="muted small">Mismo selector que <code>/agents</code> de la
+          TUI. Es una preferencia persistida (compartida con la TUI).</p>
+        <div id="agents-grid" class="effort-grid"></div>
+        <div class="modal-actions">
+          <span class="muted small" id="effort-status"></span>
+          <button class="btn-ghost" id="btn-create-agent" style="margin-top:8px"><i data-lucide="plus"></i> Crear agente custom</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ CÁMARA (menú [+] → Cámara) ═══════════════ -->
+  <div class="cam-overlay" id="cam-overlay" hidden>
+    <div class="cam-modal">
+      <div class="cam-head">
+        <span>Cámara</span>
+        <button class="btn-close" id="cam-close" aria-label="Cerrar" data-lucide="x"></button>
+      </div>
+      <div class="cam-body">
+        <video id="cam-video" autoplay playsinline muted></video>
+        <canvas id="cam-canvas" hidden></canvas>
+        <img id="cam-shot" class="cam-shot" alt="Foto capturada" hidden>
+        <div class="cam-status" id="cam-status">…</div>
+      </div>
+      <div class="cam-actions" id="cam-actions-live">
+        <button class="cam-shutter" id="cam-shutter" aria-label="Capturar foto"></button>
+      </div>
+      <div class="cam-actions" id="cam-actions-shot" hidden>
+        <button class="btn-ghost" id="cam-retake">Repetir</button>
+        <button class="btn-primary" id="cam-use">Usar foto</button>
       </div>
     </div>
   </div>
 
   <div id="toast" hidden></div>
 
-  <script src="app.js"></script>
+
+
+  <script src="icons.js"></script>
+  <script src="reasoning_block.js?v=20260926"></script>
+  <script src="app.js?v=20260925-thumbs"></script>
 </body>
 </html>
