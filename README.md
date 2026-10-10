@@ -10,11 +10,17 @@ backend FastAPI de Aether mediante SSE para streaming de tokens en vivo.
 
 - **Chat con streaming real (SSE)**: tokens en vivo, actividad del agente
   (`agent_loop`, tools, memoria) y botón de stop.
-- **Adjuntos 📎 (imágenes y archivos)**: se suben en base64 con el mensaje.
+- **Adjuntos 📎 (imágenes, archivos, audio y video)**: se suben antes de
+  enviar (`/api/attachments/upload`) y el turno los referencia por `path`.
   El backend los guarda en `~/Aether/adjuntos/`, embebe el contenido de los
   archivos de texto en la orden y describe las imágenes con el modelo de
-  visión (`MODELO_VISION`). Aether también los puede releer después con sus
-  tools de filesystem.
+  visión (`MODELO_VISION`) — o inline si el MODELO principal es multimodal.
+  Los **videos** se analizan de forma multimodal: frames equiespaciados
+  descritos con visión + transcripción del audio (faster-whisper, local).
+  El texto extraído/transcripciones se persisten junto al archivo
+  (`<archivo>.txt`), así que el turno los recupera aunque la UI solo mande
+  el `path`. Aether también puede releer los adjuntos después con sus tools
+  de filesystem.
 - **Configuración de la TUI desde la web**: edita la *misma* `config.json` que
   usa la TUI (`OLLAMA_HOST`, `SEARXNG_URL`, `TEMPERATURE`, `MAX_TOKENS`,
   `NUM_PREDICT`, `NUM_CTX`, `TIMEOUT_CMD`, `MAX_TURNOS_CONTEXTO`,
@@ -65,7 +71,7 @@ La UI no asume nada del backend más allá de estos endpoints (proyecto Aether,
 |---|---|---|
 | `/api/health` | GET | Estado del API y de Ollama (status card). |
 | `/api/status` | GET | Modelo activo, host, `NUM_CTX`, `TEMPERATURE`, effort, agente, flags del prompt. |
-| `/api/chat/stream` | POST | Chat con streaming SSE (`token`, `node`, `log`, `done`, `error`). Acepta `attachments: [{name, mime, data(base64)}]`. |
+| `/api/chat/stream` | POST | Chat con streaming SSE (`token`, `node`, `log`, `done`, `error`). Acepta `attachments: [{name, mime, data(base64)}]` o referencias `{name, mime, path}` a adjuntos ya subidos (la transcripción/texto extraído se recupera del sidecar persistido junto al archivo). |
 | `/ws/chat` | WS | Socket directo: mismo contrato de eventos, multi-mensaje por conexión. También acepta `attachments`. |
 | `/api/stop` | POST | Aborta la generación en curso. |
 | `/api/config` | GET / POST | Lee/guarda la config de la TUI (misma validación que `ConfigManager`). |
@@ -81,7 +87,7 @@ La UI no asume nada del backend más allá de estos endpoints (proyecto Aether,
 | `/api/mcps` | GET / POST | Lista servers MCP (env enmascarado) / agrega un MCP custom. |
 | `/api/mcps/{name}` | PATCH / DELETE | Edita/togglea / borra un server MCP (env enmascarado = conservar). |
 | `/api/mcps/{name}/tools` | GET | Conecta al server y lista sus tools en vivo. |
-| `/api/attachments/upload` | POST | Sube adjuntos como `multipart/form-data` (campo `files`, múltiple) antes de enviar el mensaje; el backend los guarda en `~/Aether/adjuntos/`. |
+| `/api/attachments/upload` | POST | Sube adjuntos como `multipart/form-data` (campo `files`, múltiple) antes de enviar el mensaje; el backend los guarda en `~/Aether/adjuntos/`, transcribe audio/video y extrae PDF/DOCX/SVG, persistiendo el texto junto al archivo (`<archivo>.txt`) para que el turno por `path` lo recupere. |
 | `/api/effort` | GET / POST | Nivel de esfuerzo (aplica temp/ctx/num_predict como `/effort`). |
 | `/api/agent` | GET / POST | Agente activo build/plan (como `/agents`). |
 | `/api/agents` | GET / POST | Lista los agentes disponibles + el activo / crea un agente custom (`name`, `description`, `system_prompt`, …). |
