@@ -73,6 +73,10 @@
           </div>
         </div>
         <div class="chat-header-right">
+          <!-- Reloj vivo: hora del sistema, tick cada 10 s (app.js). Sin esto
+               la única "hora" visible eran los timestamps estáticos de las
+               burbujas, que solo cambian con mensajes nuevos. -->
+          <span class="chip chip-teal" id="ui-clock" title="Hora del sistema (se actualiza sola)">--:--</span>
           <span class="chip chip-idle" id="busy-chip" hidden>• ocupado</span>
         </div>
       </header>
@@ -195,7 +199,8 @@
 
       <div class="panel">
         <div class="section-label">MODEL</div>
-        <div class="kv"><span>Modelo</span><b id="rt-model">—</b></div>
+        <div class="kv"><span title="MODELO configurado (config.json + config.local.json). Es el que el agente USARÁ en la próxima inferencia; no necesariamente está residente en memoria de Ollama.">Modelo</span><b id="rt-model">—</b></div>
+        <div class="kv"><span title="Modelos residentes AHORA en Ollama (equivale a `ollama ps`). Puede diferir del modelo configurado: otra sesión/proceso puede haber cargado otro modelo.">En memoria (ps)</span><b id="rt-loaded">—</b></div>
         <div class="kv"><span>Host</span><b id="rt-host">—</b></div>
         <div class="kv"><span>Ctx (NUM_CTX)</span><b id="rt-ctx">—</b></div>
         <div class="kv"><span>Temp</span><b id="rt-temp">—</b></div>

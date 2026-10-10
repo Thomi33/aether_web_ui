@@ -53,6 +53,22 @@ let adjuntos = [];           // adjuntos pendientes (imágenes/archivos)
 
 const LS_KEY = "aether_webui_convs";
 
+/* Marcador del turno en curso (resistencia a refresh/reinicio del
+   navegador): LS_LIVE guarda convId + el parcial del stream. Al boot,
+   restaurarTurnoVivo() lo usa para reconstruir la burbuja y re-attachearse
+   a /api/chat/live/stream (sesión live del backend). */
+const LS_LIVE = "aether_webui_live";
+let _turnoVivo = null;        // turno con stream activo (envío o re-attach)
+let _marcadorLiveTs = 0;      // throttle de escritura del marcador
+/* True desde pagehide (F5 / cierre del navegador) hasta que la página
+   muere. Durante el unload el fetch SSE aborta como "network error" y el
+   catch/finally del turno VIEJO llega a correr ANTES de morir la página:
+   sin este flag persistirían "[!] Sin conexión..." en la conversación y
+   BORRARÍAN el marcador — destruyendo justo el estado que el próximo boot
+   necesita para re-attachearse. El turno no murió: sigue en el backend
+   (la desconexión NUNCA cancela la inferencia). */
+let _pageUnloading = false;
+
 /* ══════════════════════════ Utilidades ══════════════════════════ */
 
 const RE_ANSI = /\x1b\[[0-9;]*[a-zA-Z]/g;
@@ -222,6 +238,20 @@ function renderAdjuntosHTML(atts) {
   return `<div class="msg-attachments">${partes.join("")}</div>`;
 }
 
+function horaLegible(fecha) {
+  /* Normaliza cualquier "fecha" a "hh:mm" (formato es-UY):
+     - ISO crudo del backend ("2026-10-09T19:49:05.428750") — antes se
+       mostraba TAL CUAL al abrir sesiones del runtime.
+     - ISO UTC de localStorage ("2026-10-09T23:11:54.000Z") — se convierte
+       a la hora local del navegador.
+     - Date, epoch ms o cualquier string parseable.
+     Vacía o inválida → null (el llamador decide el fallback). */
+  if (!fecha) return null;
+  const d = (fecha instanceof Date) ? fecha : new Date(fecha);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
+}
+
 function agregarBurbuja(role, text, scroll = true, fecha = "", atts = null, reasoning = "") {
   const box = $("messages");
   const wel = box.querySelector(".welcome");
@@ -230,7 +260,10 @@ function agregarBurbuja(role, text, scroll = true, fecha = "", atts = null, reas
   // FIX principal: .msg.user / .msg.assistant (matchea el CSS) y el texto
   // va dentro de .msg-content (donde el CSS aplica fondo/borde/código).
   div.className = `msg ${role}`;
-  const hora = fecha || new Date().toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
+  // FIX reloj: la fecha que llega (backend/localStorage) se NORMALIZA a
+  // hh:mm; sin fecha (mensaje recién enviado) se usa la hora del sistema.
+  const hora = horaLegible(fecha)
+    || new Date().toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
   
   // Para mensajes de usuario (row-reverse), los adjuntos deben ir DESPUÉS del contenido
   // para aparecer a la derecha junto al avatar. Para assistant, van antes (izquierda).
@@ -1067,7 +1100,11 @@ async function enviar() {
     convActual.title = tituloDe(texto || atts.map((a) => a.name).join(", "));
   }
 
-  convActual.messages.push({ role: "user", text: texto, attachments: metaAdjuntos(metasSubidas.length ? metasSubidas : atts) });
+  // FIX reloj: persistir la fecha real de envío — sin esto, cada re-render
+  // (F5, cambio de conversación) re-estampaba TODAS las burbujas con la
+  // hora del momento del render.
+  convActual.messages.push({ role: "user", text: texto, fecha: new Date().toISOString(),
+                             attachments: metaAdjuntos(metasSubidas.length ? metasSubidas : atts) });
   // Usar atts originales (tienen url/dataURL) para que renderAdjuntosHTML muestre thumbnails
   agregarBurbuja("user", texto, true, "", atts);
   persistirConvs();
@@ -1077,35 +1114,16 @@ async function enviar() {
   resetPlanTurno();
   setBusy(true);
 
-  const burbuja = agregarBurbuja("assistant", "…");
-  const msgBody = burbuja.querySelector(".msg-body");
-  const contentEl = burbuja.querySelector(".msg-content");
-  let acumulado = "";
+  /* Turno compartido (envío normal y re-attach tras refresh): burbuja +
+     handlers de eventos. El marcador live permite que el boot restaure
+     este turno si el navegador se refresca o se reinicia a mitad. */
+  const turno = crearTurno(convActual);
+  turno.marcadorId = _idMarcador();
+  marcarTurnoLive(turno, texto);
+  _turnoVivo = turno;
 
-  /* ── Bloque unificado de ESTADO + RAZONAMIENTO (reasoning_block.js) ──
-     Spec Open WebUI: el bloque existe si el modelo soporta reasoning.
-     Ahora lo creamos EAGER al recibir 'start' si ev.reasoning===true.
-     Un modelo sin reasoning streamea su respuesta directo y jamás
-     ve "Pensando..." ni un panel vacío. El razonamiento llega por su
-     PROPIO canal (el backend lo separa del content): acá NO se parsea el
-     stream de tokens. */
-  let rblock = null;
-  let modelHasReasoning = false;
-  const ensureRblock = () => {
-    if (rblock || !window.ReasoningBlock) return rblock;
-    rblock = window.ReasoningBlock.crearBloque();
-    msgBody.insertBefore(rblock.root, contentEl);
-    return rblock;
-  };
-
-  const setActividad = (t) => {
-    $("activity-chip").hidden = false;
-    $("activity-text").textContent = t;
-  };
-
-  try {
-    abortStream = new AbortController();
-    const resp = await fetch(`${API_BASE}/api/chat/stream`, {
+  await _correrTurno(turno, (signal) =>
+    fetch(`${API_BASE}/api/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1117,118 +1135,339 @@ async function enviar() {
           // Fallback (upload falló): base64 crudo, el backend lo guarda.
           : atts.map((a) => ({ name: a.name, mime: a.mime, data: a.data }))),
       }),
-      signal: abortStream.signal,
+      signal,
       _sse: true,
-    });
-    if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
+    }));
+}
+/* ══════════ Turno de chat compartido (envío normal y re-attach) ══════════
+   El manejo de eventos del stream vivía pegado dentro de enviar(); ahora
+   vive en un "turno" reutilizable: enviar() y restaurarTurnoVivo() (boot
+   tras F5/reinicio del navegador) procesan el MISMO contrato de eventos
+   con el MISMO código de render — la burbuja restaurada queda idéntica a
+   la del stream original. */
 
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      buffer += decoder.decode(chunk.value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf("\n\n")) >= 0) {
-        const crudo = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        for (const linea of crudo.split("\n")) {
-          if (!linea.startsWith("data: ")) continue;
-          const data = linea.slice(6);
-          if (data === "[DONE]") continue;
-          let ev;
-          try { ev = JSON.parse(data); } catch { continue; }
-
-          if (ev.type === "start") {
-            /* El backend ahora incluye 'reasoning' boolean indicando si el
-               modelo soporta razonamiento nativo. Si true, creamos el bloque
-               EAGER (antes del primer fragmento) para que el usuario vea
-               "✦ Pensando..." desde el inicio. */
-            if (ev.reasoning === true) {
-              modelHasReasoning = true;
-              ensureRblock();
-            }
-          } else if (ev.type === "token") {
-            /* Tokens = SOLO la respuesta final: el backend ya separó el
-               razonamiento en su propio canal; nada que parsear acá. */
-            acumulado += ev.data;
-            contentEl.innerHTML = renderTexto(acumulado);
-            $("messages").scrollTop = $("messages").scrollHeight;
-          } else if (ev.type === "reasoning") {
-            /* Fragmento de razonamiento → streamea debajo del bloque.
-               El bloque ya existe si modelHasReasoning=true, si no, lo creamos
-               lazy (compatibilidad con modelos antiguos). */
-            const rb = ensureRblock();
-            if (rb) rb.pushReasoning(ev.data);
-          } else if (ev.type === "node") {
-            /* Estado humano (mismo mapa que la TUI, lo arma el backend):
-               alimenta el chip global de actividad y la cabecera del bloque
-               (que rota verbos genéricos: Husmeando, Cocinando, ...). */
-            setActividad(ev.estado || `nodo: ${ev.node}`);
-            actualizarPlanDelta(ev.node, ev.delta);
-            if (rblock) rblock.setStatus(ev.estado || "");
-          } else if (ev.type === "log") {
-            agregarLogLinea(ev.data);
-            const log = $("activity-log");
-            log.hidden = false;
-            log.textContent = ev.data.slice(0, 160);
-          } else if (ev.type === "done") {
-            /* done.reasoning = razonamiento completo del turno (fuente
-               autoritativa del backend, por si se perdió algún fragmento). */
-            /* Ya viene limpia del backend (limpiar_respuesta_chat, la misma
-               función que usa la TUI para su respuesta final). */
-            acumulado = ev.response || acumulado || "Operación completada.";
-            contentEl.innerHTML = renderTexto(acumulado);
-            if (rblock) rblock.finalizar(ev.reasoning || "");
-          } else if (ev.type === "error") {
-            acumulado = `[!] ${ev.message}`;
-            burbuja.classList.add("error");  // FIX: clase .error (existe en CSS)
-            contentEl.innerHTML = renderTexto(acumulado);
-            if (rblock) rblock.error();
-            agregarLogLinea(ev.message, true);
-          }
-        }
+function crearTurno(conv) {
+  const burbuja = agregarBurbuja("assistant", "…");
+  const msgBody = burbuja.querySelector(".msg-body");
+  const contentEl = burbuja.querySelector(".msg-content");
+  /* Span de la hora del mensaje: al 'done'/'error' se actualiza con la
+     hora real de finalización — antes quedaba clavada en la hora de
+     ARRANQUE del turno (bug del "reloj detenido en 7:43 pm": inferencia
+     de 5 min mostrada con la hora de inicio). */
+  const horaEl = burbuja.querySelector(".msg-meta span:last-child");
+  const turno = {
+    conv, burbuja, msgBody, contentEl, horaEl,
+    acumulado: "",
+    rblock: null,
+    modelHasReasoning: false,
+    marcadorId: null,    // dueño del marcador LS_LIVE (limpieza selectiva)
+    notaFinal: "",       // nota al persistir (ej. "stream interrumpido")
+    finalizado: false,   // guard: el turno se persiste UNA sola vez
+  };
+  /* ── Bloque unificado de ESTADO + RAZONAMIENTO (reasoning_block.js) ──
+     EAGER si el modelo soporta reasoning (ev.reasoning===true en el
+     'start'/'live_start'); un modelo sin reasoning streamea su respuesta
+     directo y jamás ve "Pensando..." ni un panel vacío. El razonamiento
+     llega por su PROPIO canal (el backend lo separa del content). */
+  turno.ensureRblock = () => {
+    if (turno.rblock || !window.ReasoningBlock) return turno.rblock;
+    turno.rblock = window.ReasoningBlock.crearBloque();
+    msgBody.insertBefore(turno.rblock.root, contentEl);
+    return turno.rblock;
+  };
+  turno.setActividad = (t) => {
+    $("activity-chip").hidden = false;
+    $("activity-text").textContent = t;
+  };
+  turno.manejar = (ev) => {
+    if (ev.type === "start") {
+      if (ev.reasoning === true) {
+        turno.modelHasReasoning = true;
+        turno.ensureRblock();
+      }
+    } else if (ev.type === "token") {
+      /* Tokens = SOLO la respuesta final: el backend ya separó el
+         razonamiento en su propio canal; nada que parsear acá. */
+      turno.acumulado += ev.data;
+      turno.contentEl.innerHTML = renderTexto(turno.acumulado);
+      $("messages").scrollTop = $("messages").scrollHeight;
+      actualizarMarcadorLive(turno);
+    } else if (ev.type === "reasoning") {
+      const rb = turno.ensureRblock();
+      if (rb) rb.pushReasoning(ev.data);
+      actualizarMarcadorLive(turno);
+    } else if (ev.type === "node") {
+      /* Estado humano (mismo mapa que la TUI, lo arma el backend):
+         alimenta el chip global de actividad y la cabecera del bloque
+         (que rota verbos genéricos: Husmeando, Cocinando, ...). */
+      turno.setActividad(ev.estado || `nodo: ${ev.node}`);
+      actualizarPlanDelta(ev.node, ev.delta);
+      if (turno.rblock) turno.rblock.setStatus(ev.estado || "");
+    } else if (ev.type === "log") {
+      agregarLogLinea(ev.data);
+      const log = $("activity-log");
+      log.hidden = false;
+      log.textContent = ev.data.slice(0, 160);
+    } else if (ev.type === "done") {
+      /* done.reasoning = razonamiento completo del turno (fuente
+         autoritativa del backend, por si se perdió algún fragmento).
+         Ya viene limpia del backend (limpiar_respuesta_chat). */
+      turno.acumulado = ev.response || turno.acumulado || "Operación completada.";
+      turno.contentEl.innerHTML = renderTexto(turno.acumulado);
+      if (turno.rblock) turno.rblock.finalizar(ev.reasoning || "");
+      /* FIX reloj: la burbuja del assistant muestra la hora en que la
+         respuesta TERMINÓ, no la de arranque del turno. */
+      if (turno.horaEl) {
+        turno.horaEl.textContent = horaLegible(new Date());
+      }
+    } else if (ev.type === "error") {
+      turno.acumulado = `[!] ${ev.message}`;
+      turno.burbuja.classList.add("error");  // FIX: clase .error (existe en CSS)
+      turno.contentEl.innerHTML = renderTexto(turno.acumulado);
+      if (turno.rblock) turno.rblock.error();
+      /* FIX reloj: el turno terminó (con error) — la hora refleja ese
+         momento, no el arranque. */
+      if (turno.horaEl) {
+        turno.horaEl.textContent = horaLegible(new Date());
+      }
+      agregarLogLinea(ev.message, true);
+    }
+  };
+  /* Re-attach: el replay reconstruye el turno desde seq 0 → el parcial
+     sembrado del marcador se descarta para no duplicar texto/razonamiento. */
+  turno.reiniciar = () => {
+    if (turno.rblock) { turno.rblock.root.remove(); turno.rblock = null; }
+    turno.acumulado = "";
+    turno.contentEl.innerHTML = renderTexto("");
+  };
+  return turno;
+}
+/* Lee el body SSE de una respuesta (POST /chat/stream o GET /chat/live)
+   y llama onEvento(payload) por cada "data: {...}" JSON. Ignora los
+   keep-alives (": ...") y el [DONE] final. */
+async function leerSSE(resp, onEvento) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) >= 0) {
+      const crudo = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      for (const linea of crudo.split("\n")) {
+        if (!linea.startsWith("data: ")) continue;
+        const data = linea.slice(6);
+        if (data === "[DONE]") continue;
+        let ev;
+        try { ev = JSON.parse(data); } catch { continue; }
+        onEvento(ev);
       }
     }
+  }
+}
+
+/* Corre UNA conexión SSE para el turno (fetch + lectura + catch/finally),
+   compartida por el envío normal y el re-attach tras refresh. */
+async function _correrTurno(turno, hacerFetch) {
+  try {
+    abortStream = new AbortController();
+    const resp = await hacerFetch(abortStream.signal);
+    if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`);
+    await leerSSE(resp, (ev) => {
+      if (ev.type === "live_start") {
+        /* Re-attach: mismo flag de reasoning que el 'start' del stream
+           normal → bloque "Pensando..." eager si corresponde. */
+        if (ev.reasoning === true) {
+          turno.modelHasReasoning = true;
+          turno.ensureRblock();
+        }
+      } else if (ev.type === "live_end") {
+        /* Fin del canal live: nada (done/error ya cerraron el turno). */
+      } else if (ev.type === "live_none") {
+        /* La sesión ya no existe (backend reiniciado / TTL vencido): el
+           turno se cierra con el parcial del marcador + nota. */
+        turno.notaFinal = turno.notaFinal
+          || "[X] *stream interrumpido (sesión no disponible)*";
+      } else {
+        turno.manejar(ev);
+      }
+    });
   } catch (err) {
-    if (err.name === "AbortError") {
-      acumulado += "\n\n[X] *cancelado*";
+    if (_pageUnloading) {
+      /* La página se está descargando (F5 / cierre): el fetch SSE aborta
+         con un error de red DURANTE el unload. El turno NO murió — sigue
+         corriendo en el backend (la desconexión nunca cancela la
+         inferencia). No marcar nada: el marcador intacto deja que el
+         próximo boot re-attachee con restaurarTurnoVivo(). */
+    } else if (err.name === "AbortError") {
+      turno.acumulado += "\n\n[X] *cancelado*";
     } else {
-      acumulado = `[!] Sin conexión con el backend: ${err.message}`;
-      burbuja.classList.add("error");
+      turno.acumulado = `[!] Sin conexión con el backend: ${err.message}`;
+      turno.burbuja.classList.add("error");
       agregarLogLinea(`Error de conexión: ${err.message}`, true);
     }
-    contentEl.innerHTML = renderTexto(acumulado);
+    turno.contentEl.innerHTML = renderTexto(turno.acumulado);
     /* El bloque no queda "vivo" para siempre al cortarse el stream:
        cancelación → conserva el razonamiento recibido (queda expandible);
        error de conexión → estado de error (y se descarta si no hay
-       razonamiento, en el finally). */
-    if (rblock) {
-      if (err.name === "AbortError") rblock.finalizar(rblock.reasoning());
-      else rblock.error();
+       razonamiento, en finalizarTurno). */
+    if (turno.rblock) {
+      if (err.name === "AbortError") turno.rblock.finalizar(turno.rblock.reasoning());
+      else turno.rblock.error();
     }
   } finally {
+    finalizarTurno(turno);
+  }
+}
+
+/* Persiste el turno completo: UNA sola vez (guard), con dedup multi-tab
+   y limpiando el marcador live si este turno es su dueño. */
+function finalizarTurno(turno) {
+  if (turno.finalizado) return;
+  /* Descarga de página en curso (F5/cierre): NUNCA finalizar acá — el
+     turno sigue vivo en el backend y el marcador debe sobrevivir al
+     unload para que el próximo boot re-attachee en vivo. */
+  if (_pageUnloading) return;
+  turno.finalizado = true;
+  const conv = turno.conv;
+  let texto = turno.acumulado === "…" ? "" : turno.acumulado;
+  if (turno.notaFinal) texto = texto ? `${texto}\n\n${turno.notaFinal}` : turno.notaFinal;
+  const razonamiento = (turno.rblock ? turno.rblock.reasoning() : "") || undefined;
+  /* Dedup multi-tab: dos tabs restaurando el MISMO turno pueden
+     finalizarlo a la vez; si el último mensaje ya es esta respuesta
+     idéntica, no se duplica. */
+  const ultimo = conv.messages[conv.messages.length - 1];
+  if (!ultimo || ultimo.role !== "assistant" || ultimo.text !== texto) {
     /* El razonamiento queda persistido con el mensaje: al reabrir la
        conversación el chip "Pensado — ver razonamiento" sigue disponible. */
-    convActual.messages.push({
-      role: "assistant",
-      text: acumulado,
-      reasoning: (rblock ? rblock.reasoning() : "") || undefined,
-    });
-    /* Sin razonamiento: el bloque de estado ya cumplió su función y se
-       retira (nada de toggles inútiles). Con razonamiento queda como
-       "✓ Completado", expandible para siempre. */
-    if (rblock && window.ReasoningBlock.debeDescartarBloque(rblock.estado)) {
-      rblock.root.remove();
+    conv.messages.push({ role: "assistant", text: texto, reasoning: razonamiento,
+                         fecha: new Date().toISOString() });
+  }
+  /* Sin razonamiento: el bloque de estado ya cumplió su función y se
+     retira (nada de toggles inútiles). Con razonamiento queda como
+     "✓ Completado", expandible para siempre. */
+  if (turno.rblock && window.ReasoningBlock.debeDescartarBloque(turno.rblock.estado)) {
+    turno.rblock.root.remove();
+  }
+  persistirConvs();
+  if (_turnoVivo === turno) _turnoVivo = null;
+  /* Solo el turno dueño del marcador lo limpia (un turno rechazado por
+     "ya hay una inferencia en curso" no borra el marcador de la activa). */
+  if (turno.marcadorId) {
+    const m = _leerMarcadorLive();
+    if (m && m.marcadorId === turno.marcadorId) limpiarMarcadorLive();
+  }
+  setBusy(false);
+  abortStream = null;
+  refrescarStatus();
+  /* La respuesta ya quedó registrada en memoria: refrescar sesiones. */
+  cargarSesiones();
+}
+/* ══════════ Marcador del turno en curso (LS_LIVE) ══════════
+   Resistencia a F5/reinicio del navegador: la clave guarda convId + el
+   parcial del stream (escritura throttled ~1.5 s + sincrónica en
+   pagehide). Al boot, restaurarTurnoVivo() la usa para reconstruir la
+   burbuja y re-attachearse a /api/chat/live/stream (sesión live). */
+
+function _idMarcador() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function _leerMarcadorLive() {
+  try { return JSON.parse(localStorage.getItem(LS_LIVE) || "null"); }
+  catch { return null; }
+}
+
+function marcarTurnoLive(turno, orden) {
+  localStorage.setItem(LS_LIVE, JSON.stringify({
+    marcadorId: turno.marcadorId,
+    convId: turno.conv.id,
+    orden,
+    startedAt: Date.now(),
+    partialText: "",
+    partialReasoning: "",
+    ts: Date.now(),
+  }));
+  _marcadorLiveTs = Date.now();
+}
+
+function actualizarMarcadorLive(turno, forzar = false) {
+  if (!turno.marcadorId) return;
+  const ahora = Date.now();
+  if (!forzar && ahora - _marcadorLiveTs < 1500) return;
+  const m = _leerMarcadorLive();
+  if (!m || m.marcadorId !== turno.marcadorId) return;
+  m.partialText = turno.acumulado;
+  m.partialReasoning = turno.rblock ? turno.rblock.reasoning() : "";
+  m.ts = ahora;
+  localStorage.setItem(LS_LIVE, JSON.stringify(m));
+  _marcadorLiveTs = ahora;
+}
+
+function limpiarMarcadorLive() {
+  localStorage.removeItem(LS_LIVE);
+  _marcadorLiveTs = 0;
+}
+
+/* ══════════ Re-attach tras refresh/reinicio del navegador ══════════
+   Al boot: si había un turno en curso (marcador LS_LIVE), reconstruye la
+   conversación con el parcial recibido y se re-attachea al stream vivo
+   del backend (/api/chat/live/stream desde seq 0): la UI sigue mostrando
+   la inferencia en curso (tokens en vivo) y el turno completa como si
+   nada hubiera pasado. Sin sesión live (backend reiniciado / TTL vencido)
+   el parcial se finaliza con nota de interrupción. */
+async function restaurarTurnoVivo() {
+  const m = _leerMarcadorLive();
+  if (!m || !m.convId) return;
+
+  const conv = conversaciones.find((c) => c.id === m.convId);
+  if (!conv) { limpiarMarcadorLive(); return; }
+  convActual = conv;
+  sesionVista = null;
+  pintarConvList();
+  pintarMensajes();   // el mensaje del usuario ya quedó persistido antes del stream
+
+  const turno = crearTurno(conv);
+  turno.marcadorId = m.marcadorId || null;
+  _turnoVivo = turno;
+
+  /* Fallback visual inmediato: el parcial que llegó hasta el refresh. Si
+     la sesión live sigue viva, reiniciar() lo pisa con el replay exacto
+     (reconstruido desde seq 0, sin duplicar texto/razonamiento). */
+  turno.acumulado = m.partialText || "";
+  if (m.partialReasoning) {
+    const rb = turno.ensureRblock();
+    if (rb) rb.pushReasoning(m.partialReasoning);
+  }
+  if (turno.acumulado) turno.contentEl.innerHTML = renderTexto(turno.acumulado);
+  resetPlanTurno();
+  setBusy(true);
+  toast("Reanudando el turno en curso…");
+
+  try {
+    const st = await (await api("/api/chat/live/status")).json();
+    /* ¿La sesión live es la del turno del marcador? (si ese turno ya
+       terminó y arrancó OTRO, no se consume como propia). */
+    const inicioSesionMs = (st.inicio || 0) * 1000;
+    const esNuestra = (st.active || st.done)
+      ? Math.abs((m.startedAt || 0) - inicioSesionMs) < 5000 : false;
+    if (!esNuestra) {
+      turno.notaFinal = "[X] *stream interrumpido por recarga*";
+      finalizarTurno(turno);
+      return;
     }
-    persistirConvs();
-    setBusy(false);
-    abortStream = null;
-    refrescarStatus();
-    /* La respuesta ya quedó registrada en memoria: refrescar sesiones. */
-    cargarSesiones();
+    /* Replay desde seq 0: texto/plan/razonamiento se reconstruyen exactos
+       (acumulado arranca de cero → sin duplicaciones). */
+    turno.reiniciar();
+    await _correrTurno(turno, (signal) =>
+      fetch(`${API_BASE}/api/chat/live/stream?since=0`, { signal, _sse: true }));
+  } catch {
+    /* /api/chat/live/status caído (backend offline): mismo fallback. */
+    turno.notaFinal = "[X] *stream interrumpido por recarga*";
+    finalizarTurno(turno);
   }
 }
 
@@ -1261,9 +1500,17 @@ async function refrescarStatus() {
     $("rt-sub").textContent = st.busy
       ? "Procesando una orden…"
       : (online ? "Motor LangGraph listo" : "inicializando…");
+    /* El "model" del status es el CONFIGURADO (MODELO en config.json +
+       config.local.json), no necesariamente el residente en Ollama. El
+       tooltip lo aclara; los residentes van en la fila "En memoria (ps)". */
+    const modelTip = "MODELO configurado (config.json + config.local.json): "
+      + "el que el agente USARÁ en la próxima inferencia. "
+      + "Los residentes AHORA en Ollama se ven en Runtime → En memoria (ps).";
     $("status-model").textContent = st.model || "—";
+    $("status-model").title = modelTip;
     $("status-host").textContent = st.ollama || "—";
     $("rt-model").textContent = st.model || "—";
+    $("rt-model").title = modelTip;
     $("rt-host").textContent = st.ollama || "—";
     $("rt-mem").textContent = (st.memory_size ?? "—");
     $("rt-version").textContent = st.version || "—";
@@ -1290,6 +1537,29 @@ async function refrescarStatus() {
       $("rt-sp-sintesis").textContent = activo(r.config.SYSTEM_PROMPT_SINTESIS_EXTRA);
     }
   } catch { /* el panel queda con — */ }
+
+  /* Modelos realmente RESIDENTES en Ollama (equivale a `ollama ps`).
+     Acá se ve la diferencia con el MODELO configurado de arriba: otra
+     sesión/proceso puede haber cargado otro modelo, o el configurado puede
+     no estar en memoria todavía (se carga en la próxima inferencia). */
+  try {
+    const ps = await (await api("/api/ollama/ps")).json();
+    const loaded = $("rt-loaded");
+    if (ps.ok && ps.models && ps.models.length) {
+      loaded.textContent = ps.models.map((m) => `${m.name}${m.active ? "  •" : ""}`).join(", ");
+      loaded.title = ps.models.map((m) =>
+        `${m.name} — ${m.processor || "?"}`
+        + (m.expires_at
+           ? ` — expira: ${new Date(m.expires_at).toLocaleTimeString()}`
+           : " — sin expiración (keep_alive permanente)")
+      ).join("\n");
+    } else {
+      loaded.textContent = ps.ok ? "(nada en memoria)" : "ollama no responde";
+      loaded.title = ps.error || "";
+    }
+  } catch {
+    $("rt-loaded").textContent = "—";
+  }
 }
 
 const activo = (v) => (((v ?? "") + "").trim() ? "ACTIVO" : "off");
@@ -2472,6 +2742,15 @@ function activarTabWorkspace(tabId) {
 /* ══════════════════════════ Wiring inicial ══════════════════════════ */
 
 $("btn-send").addEventListener("click", enviar);
+/* F5 / cierre del navegador: (1) marcar el unload ANTES de que el fetch
+   SSE aborte (pagehide corre primero — con eso el catch/finally del turno
+   saben que no deben matar el turno), y (2) persistir el parcial del
+   turno en curso (escritura sincrónica) como fallback por si el backend
+   ya no conserva la sesión live. */
+window.addEventListener("pagehide", () => {
+  _pageUnloading = true;
+  if (_turnoVivo && !_turnoVivo.finalizado) actualizarMarcadorLive(_turnoVivo, true);
+});
 $("btn-stop").addEventListener("click", async () => {
   try {
     await fetch(`${API_BASE}/api/stop`, { method: "POST" });
@@ -2712,3 +2991,21 @@ cargarSesiones();
 refrescarStatus();
 setInterval(refrescarStatus, 6000);
 setInterval(cargarSesiones, 30000);
+
+/* ════════════════ Reloj vivo del sistema (fix "reloj detenido") ════════════════
+   La UI no tenía NINGÚN reloj: la única "hora" visible eran los timestamps
+   estáticos de las burbujas, que solo cambian con mensajes nuevos. Con el
+   último turno arrancando a las 7:43 pm y sin actividad después, la UI
+   parecía tener el reloj congelado. Este chip del header (#ui-clock) hace
+   tick con new Date() — la hora del sistema donde corre el navegador. */
+function _tickReloj() {
+  const c = $("ui-clock");
+  if (!c) return;
+  c.textContent = new Date().toLocaleTimeString("es-UY", { hour: "2-digit", minute: "2-digit" });
+}
+_tickReloj();
+setInterval(_tickReloj, 10000);
+/* Al volver a la pestaña, re-tick inmediato (los timers en background van
+   throttled y podrían haber quedado atrás). */
+document.addEventListener("visibilitychange", _tickReloj);
+restaurarTurnoVivo();   // re-attach del turno interrumpido (F5 / reinicio)
