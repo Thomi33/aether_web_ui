@@ -106,9 +106,24 @@ code {
   margin-bottom: 8px;
 }
 
-.conv-section { flex: 1; min-height: 60px; }
+/* La sección scrollea POR DENTRO (label fija arriba + #conv-list con
+   overflow): sin overflow:hidden el contenido se derramaba visualmente
+   sobre SESIONES AETHER cuando flexbox comprimía esta caja hasta su
+   min-height (bug de superposición conversaciones/sesiones). */
+.conv-section {
+  flex: 1;
+  min-height: 60px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 
-#conv-list { list-style: none; }
+#conv-list {
+  list-style: none;
+  flex: 1;
+  min-height: 0;      /* permite encoger dentro de .conv-section */
+  overflow-y: auto;   /* scroll propio: ya no se derrama sobre las sesiones */
+}
 #conv-list li {
   padding: 8px 10px;
   border-radius: 8px;
@@ -137,7 +152,11 @@ code {
 #conv-list li .del:hover { color: var(--danger); background: rgba(255, 107, 107, 0.1); }
 
 /* ═══ SESIONES DEL RUNTIME (memoria.db vía /api/sessions) ═══ */
-#session-list { list-style: none; }
+#session-list {
+  list-style: none;
+  max-height: 200px;   /* tope ~6 ítems: scrollea en vez de empujar el sidebar */
+  overflow-y: auto;
+}
 #session-list li {
   padding: 6px 10px;
   border-radius: 8px;
